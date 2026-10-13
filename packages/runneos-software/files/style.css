@@ -1,0 +1,26 @@
+@define-color accent_bg_color @ACCENTBG@;
+@define-color accent_color @ACCENT@;
+@define-color accent_fg_color #ffffff;
+window { background: @BG@; color: @TEXT@; }
+.sidebar { background: @SURFACE@; padding: 0 18px 24px; border-right: 1px solid alpha(@BORDER@, .28); }
+.brand { font-size: 19px; font-weight: 800; letter-spacing: -.4px; }
+.sidebar-footer { padding: 12px 6px; }
+.navigation { padding: 14px 12px; border-radius: 12px; border: none; background: transparent; box-shadow: none; }
+.navigation:hover { background: @RAISED@; }
+.navigation.selected { background: alpha(@ACCENT@, .18); color: @ACCENT@; font-weight: 700; }
+.page-title { font-size: 27px; font-weight: 800; letter-spacing: -.65px; }
+.section-title { font-size: 19px; font-weight: 700; }
+.muted { opacity: 1; color: @MUTED@; }
+.caption { font-size: 12px; }
+.hero { padding: 26px; border-radius: 12px; background: @SURFACE@; border: 1px solid @BORDER@; }
+.hero-title { font-size: 29px; font-weight: 800; letter-spacing: -.7px; }
+.app-card { padding: 20px; border-radius: 12px; background: @SURFACE@; border: 1px solid @BORDER@; box-shadow: none; }
+.app-card:hover { background: @RAISED@; border-color: alpha(@ACCENT@, .55); }
+.card-title { font-size: 16px; font-weight: 700; }
+.accent { color: @ACCENT@; }
+.installed { color: @ACCENT@; }
+flowboxchild { padding: 0; }
+searchentry { border-radius: 12px; min-height: 36px; }
+textview { background: @SURFACE@; padding: 12px; }
+progressbar trough { min-height: 6px; border-radius: 6px; }
+preferencesgroup > box > box > list { background: @SURFACE@; }

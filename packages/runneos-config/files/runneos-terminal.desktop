@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Ghostty
+Comment=Ghostty terminal with RunneOS command integration
+Exec=runneos-terminal
+TryExec=ghostty
+Icon=com.mitchellh.ghostty
+Terminal=false
+Categories=System;TerminalEmulator;
+NoDisplay=true
+X-TerminalArgExec=-e
+X-TerminalArgDir=--working-directory

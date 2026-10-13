@@ -1,0 +1,43 @@
+# Runne OS build of Vicinae from upstream source (based on AUR "vicinae" PKGBUILD)
+pkgname=runneos-vicinae
+_name=vicinae
+pkgver=0.29.1
+_commit=7f1d1d96ea7ca9b08130962c91d0469df24a1362
+pkgrel=3
+pkgdesc="A focused launcher for your desktop - native, fast, extensible (Runne OS build)"
+arch=(x86_64)
+url="https://github.com/vicinaehq/vicinae"
+license=(GPL3)
+depends=(nodejs qt6-base qt6-svg layer-shell-qt libqalculate qtkeychain-qt6 qt6-declarative syntax-highlighting)
+makedepends=(git cmake ninja npm jq glaze curl qt6-shadertools qt6-tools wayland-protocols cmark-gfm)
+provides=(vicinae)
+conflicts=(vicinae vicinae-bin)
+source=("${_name}-v${pkgver}.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=(ca79782e7c94faa9da1bd12ba1a361cea41970db781447773acb9a580a47cea8)
+
+build() {
+  cd "${_name}-${pkgver}"
+  cmake -G Ninja \
+    -DVICINAE_GIT_TAG="v${pkgver}" \
+    -DVICINAE_GIT_COMMIT_HASH="${_commit:0:7}" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DVICINAE_PROVENANCE=runneos \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -B build
+  # keep parallelism bounded (machine froze at full -j)
+  cmake --build build -j4
+}
+
+package() {
+  cd "${_name}-${pkgver}"
+  DESTDIR="$pkgdir" cmake --install build
+  install -Dm644 "$startdir/files/vicinae-toggle.desktop" "$pkgdir/usr/share/applications/vicinae-toggle.desktop"
+  # Runne OS defaults: clipboard history off
+  install -Dm644 "$startdir/files/settings.json" "$pkgdir/etc/skel/.config/vicinae/settings.json"
+  install -Dm644 "$startdir/files/runneos-light.toml" "$pkgdir/usr/share/vicinae/themes/runneos-light.toml"
+  # skip upstream first-run welcome window
+  install -Dm644 "$startdir/files/onboarding.json" "$pkgdir/etc/skel/.local/state/vicinae/onboarding.json"
+  # autostart the server in every graphical session
+  install -d "$pkgdir/usr/lib/systemd/user/graphical-session.target.wants"
+  ln -s ../vicinae.service "$pkgdir/usr/lib/systemd/user/graphical-session.target.wants/vicinae.service"
+}

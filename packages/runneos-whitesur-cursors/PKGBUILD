@@ -1,0 +1,19 @@
+# Maintainer: RunneOS <https://github.com/Ryltsevmg/runne-os>
+pkgname=runneos-whitesur-cursors
+_repo=WhiteSur-cursors
+_commit=e190baf618ed95ee217d2fd45589bd309b37672b
+pkgver=0.git.e190baf
+pkgrel=1
+pkgdesc="WhiteSur cursor theme for Runne OS"
+arch=('any')
+url="https://github.com/vinceliuice/WhiteSur-cursors"
+license=('GPL-3.0-or-later')
+source=("${_repo}-${_commit}.tar.gz::https://github.com/vinceliuice/${_repo}/archive/${_commit}.tar.gz")
+sha256sums=('35c817c2c26bc4d2c06801cfe6c924a068ad771d3846c5203b04d1c893dd5664')
+
+package() {
+  local s="${srcdir}/${_repo}-${_commit}"
+  install -d "$pkgdir/usr/share/icons"
+  cp -pr "$s/dist" "$pkgdir/usr/share/icons/WhiteSur-cursors"
+  install -Dm644 "$s/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

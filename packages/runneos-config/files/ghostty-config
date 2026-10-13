@@ -1,0 +1,10 @@
+# Runne OS default Ghostty config
+gtk-titlebar = false
+window-decoration = server
+config-file = /usr/share/runneos/theme/ghostty-carbon.conf
+font-family = JetBrains Mono
+font-size = 13
+# Avoid io_uring waits being accounted as storage I/O pressure.
+async-backend = epoll
+keybind = super+c=copy_to_clipboard
+keybind = super+v=paste_from_clipboard

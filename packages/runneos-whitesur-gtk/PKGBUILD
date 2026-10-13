@@ -1,0 +1,29 @@
+# Maintainer: RunneOS <https://github.com/Ryltsevmg/runne-os>
+pkgname=runneos-whitesur-gtk
+_repo=WhiteSur-gtk-theme
+_commit=99247ecd219bdc1c7409baff062b4aafcf1102a7
+pkgver=0.git.99247ec
+pkgrel=1
+pkgdesc="WhiteSur GTK 2/3/4 theme for Runne OS (no GNOME Shell assets)"
+arch=('any')
+url="https://github.com/vinceliuice/WhiteSur-gtk-theme"
+license=('MIT')
+optdepends=('gtk-engine-murrine: GTK2 support')
+source=("${_repo}-${_commit}.tar.gz::https://github.com/vinceliuice/${_repo}/archive/${_commit}.tar.gz")
+sha256sums=('5c450592ff55bcae98b19d6408d1462288d81e8787b5ef3a96b445a1a35429d2')
+
+# Uses the prebuilt themes shipped in release/ (what install.sh produces), GTK parts only.
+package() {
+  local s="${srcdir}/${_repo}-${_commit}"
+  local d="$pkgdir/usr/share/themes" t
+  install -d "$d"
+  for t in WhiteSur-Light WhiteSur-Dark WhiteSur-Light-solid WhiteSur-Dark-solid; do
+    bsdtar -xf "$s/release/$t.tar.xz" -C "$srcdir"
+    install -d "$d/$t"
+    cp -r "$srcdir/$t"/{gtk-2.0,gtk-3.0,gtk-4.0,index.theme} "$d/$t/"
+    sed -i '/^\[X-GNOME-Metatheme\]/,$ { /^MetacityTheme=/d; /^ButtonLayout=/d }' "$d/$t/index.theme"
+  done
+  find "$d" -type d -exec chmod 755 {} +
+  find "$d" -type f -exec chmod 644 {} +
+  install -Dm644 "$s/COPYING" "$pkgdir/usr/share/licenses/$pkgname/COPYING"
+}

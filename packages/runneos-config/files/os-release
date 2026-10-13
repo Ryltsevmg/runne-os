@@ -1,0 +1,5 @@
+NAME="Runne OS"
+PRETTY_NAME="Runne OS"
+ID=runneos
+ID_LIKE=arch
+BUILD_ID=rolling

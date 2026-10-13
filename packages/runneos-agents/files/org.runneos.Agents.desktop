@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=RunneOS Agents
+Name[ru]=Агенты RunneOS
+GenericName=Agent console
+GenericName[ru]=Пульт агентов
+Comment=Local AI agents: tasks, sessions and progress
+Comment[ru]=Локальные ИИ-агенты: задачи, сессии и ход выполнения
+Exec=runneos-agents-panel
+Icon=system-users-symbolic
+Terminal=false
+Categories=Utility;
+Keywords=agents;AI;codex;opencode;tasks;sessions;агенты;ии;задачи;сессии;
+StartupNotify=true
+StartupWMClass=org.runneos.Agents

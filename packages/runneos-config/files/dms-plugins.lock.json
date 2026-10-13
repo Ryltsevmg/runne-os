@@ -1,0 +1,30 @@
+{
+  "lockfileVersion": 1,
+  "plugins": {
+    "calculator": {
+      "repo": "https://github.com/rochacbruno/DankCalculator",
+      "commit": "c9fbbe921e9afeb92f4e92390e9fc05f006f0373"
+    },
+    "dankAIUsage": {
+      "repo": "https://github.com/alcxyz/DankAIUsage",
+      "commit": "57f0b6368ad8c7119b07e479ffd08850f9d62c72"
+    },
+    "keyboardLayoutSearch": {
+      "repo": "https://github.com/korbash/dms-keyboard-layout-search",
+      "path": "plugin",
+      "commit": "577d3d441f2435934cd5a8399c78a30f8ba731a7"
+    },
+    "niriWindows": {
+      "repo": "https://github.com/rochacbruno/DankNiriWindows",
+      "commit": "411d5ee9f7707029f4c12c824ec3b24ca6756a0d"
+    },
+    "screenRecorder": {
+      "repo": "https://github.com/arqueon/dms-screen-recorder",
+      "commit": "1e25de9d16e63871d53b21127d31af026fa60cd6"
+    },
+    "screenshotPlus": {
+      "repo": "https://github.com/pcmid/dms-screenshot-plus",
+      "commit": "af9a87dc9b3c9b27a23eec963a2a75ef037f1828"
+    }
+  }
+}

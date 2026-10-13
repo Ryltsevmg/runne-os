@@ -1,0 +1,66 @@
+name: iso
+# Собирает live-ISO RunneOS и публикует его частями (<2 GiB на ассет) как release.
+# Запуск: workflow_dispatch или тег iso-*.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['iso-*']
+permissions:
+  contents: write
+concurrency:
+  group: iso-build
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      - name: Toolchain
+        run: |
+          pacman -Syu --noconfirm archiso git python librsvg go sudo
+      - uses: actions/checkout@v4
+      - name: Build packages (as builder user)
+        run: |
+          useradd -m builder
+          chown -R builder:builder .
+          sudo -u builder ./scripts/build-repo.sh
+      - name: Build ISO (as root, mirrors scripts/build.sh --no-repo)
+        run: |
+          root=$PWD
+          ln -sfn "$root/out/repo" /runneos-repo
+          rm -rf "$root/work/archiso"
+          mkdir -p "$root/work/archiso"
+          installer_dest="$root/iso/airootfs/usr/share/runneos/installer"
+          rm -rf -- "$installer_dest"
+          mkdir -p "$installer_dest"
+          cp -a "$root/installer/user_configuration.json" "$root/installer/runneos-install" \
+                "$root/installer/README.md" "$installer_dest/"
+          repo_dest="$root/iso/airootfs/runneos-repo"
+          rm -rf -- "$repo_dest"
+          mkdir -p "$repo_dest"
+          cp -a "$root/out/repo/." "$repo_dest/"
+          install -Dm644 "$root/iso/pacman.conf" "$root/iso/airootfs/etc/pacman.conf"
+          mkarchiso -v -w "$root/work/archiso" -o out iso
+          cd out
+          newest=$(ls -t runneos-*-x86_64.iso | head -1)
+          sha256sum "$newest" > "$newest.sha256"
+      - name: Split ISO (GitHub release asset limit is 2 GiB)
+        run: |
+          cd out
+          iso=$(ls -t runneos-*-x86_64.iso | head -1)
+          split -b 1900M -d "$iso" "$iso.part"
+          sha256sum "$iso".part* >> "$iso.sha256"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd out
+          iso=$(ls -t runneos-*-x86_64.iso | head -1)
+          tag="${GITHUB_REF_NAME}"
+          if [[ "$tag" == iso-* ]]; then rel="$tag"; else rel="iso-$(date -u +%Y.%m.%d)"; fi
+          gh release delete "$rel" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$rel" --title "RunneOS $rel" \
+            --notes "Live ISO. Склейка частей: cat $iso.part* > $iso (sha256 в $iso.sha256)"
+          gh release upload "$rel" "$iso".part* "$iso.sha256" --clobber

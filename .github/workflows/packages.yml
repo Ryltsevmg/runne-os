@@ -1,0 +1,50 @@
+name: packages
+# Собирает все пакеты runneos-* и публикует rolling-репозиторий [runneos]
+# как release-ассеты тега repo-current. Клиент:
+#   Server = https://github.com/Ryltsevmg/runne-os/releases/download/repo-current
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'packages/**'
+      - 'scripts/build-repo.sh'
+      - '.github/workflows/packages.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: repo-publish
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      - name: Toolchain
+        run: |
+          pacman -Syu --noconfirm git python librsvg go
+      - uses: actions/checkout@v4
+      - name: Build packages
+        run: |
+          useradd -m builder
+          chown -R builder:builder .
+          sudo -u builder ./scripts/build-repo.sh
+      - name: Publish rolling repo release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release delete repo-current --yes --cleanup-tag 2>/dev/null || true
+          gh release create repo-current --title "runneos pacman repository" --notes "Rolling [runneos] repository (no package signing yet).
+
+          /etc/pacman.conf:
+          [runneos]
+          SigLevel = Optional TrustAll
+          Server = https://github.com/${{ github.repository }}/releases/download/repo-current"
+          gh release upload repo-current out/repo/x86_64/* --clobber
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: runneos-repo
+          path: out/repo/x86_64/

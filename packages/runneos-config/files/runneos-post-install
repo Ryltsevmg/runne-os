@@ -1,0 +1,232 @@
+#!/bin/bash
+# RunneOS post-install steps for a freshly installed system.
+#
+# Shipped by runneos-config and invoked by the installer (installer/user_configuration.json
+# -> custom_commands) inside the new system. Safe to re-run: every step checks the
+# current state first. Default mode only reports; pass --apply to change anything.
+#
+# Why a package ships this: the steps belong to the configuration the package
+# owns, and the installer only calls them. Nothing here touches the live medium.
+set -uo pipefail
+
+apply=0
+case "${1:-}" in
+	--apply) apply=1 ;;
+	--check|"") apply=0 ;;
+	*) echo "usage: runneos-post-install [--check|--apply]" >&2; exit 2 ;;
+esac
+
+problems=0
+note() { printf '  %-8s %s\n' "$1" "$2"; }
+act() {
+	# act <description> <command...>
+	local description=$1; shift
+	if (( apply )); then
+		if "$@" >/dev/null 2>&1; then note 'applied' "$description"; else note 'FAILED' "$description"; problems=$((problems+1)); fi
+	else
+		note 'to do' "$description"
+	fi
+}
+ok_or() { # ok_or <condition-result> <ok text> <to-do text>
+	if (( $1 )); then note 'ok' "$2"; else note 'to do' "$3"; fi
+}
+
+# The RunneOS package server. Default is the project's own repository, published
+# over the tailnet by scripts/publish-repo.sh; override when it moves.
+server=${RUNNEOS_REPO_SERVER:-https://github.com/Ryltsevmg/runne-os/releases/download/repo-current}
+arch=$(uname -m)
+pacman_conf=${RUNNEOS_PACMAN_CONF:-/etc/pacman.conf}
+hosts_conf=${RUNNEOS_HOSTS_CONF:-/etc/hosts}
+server_ip=${RUNNEOS_REPO_IP:-100.69.28.21}
+
+# Read-only reachability probe: python is already a dependency of this package.
+# Three outcomes, because they mean different things:
+#   0 — server answered
+#   1 — name resolved, server did not answer
+#   2 — the name does not resolve here (says nothing about the server)
+# Code 2 must never add a section or replace a working address: MagicDNS is
+# maintained by Tailscale, and NetworkManager can overwrite /etc/resolv.conf and
+# drop it, after which every tailnet name stops resolving in that shell while the
+# server keeps working. It is still a reason to remove the live-medium path —
+# see step 1 below.
+repository_reachable() {
+	python3 - "$1" <<'PY' >/dev/null 2>&1
+import socket, sys, urllib.parse, urllib.request
+url = sys.argv[1]
+host = urllib.parse.urlsplit(url).hostname or ''
+try:
+	socket.getaddrinfo(host, 443)
+except socket.gaierror:
+	raise SystemExit(2)
+try:
+	urllib.request.urlopen(url, timeout=5).read(1)
+except Exception:
+	raise SystemExit(1)
+PY
+}
+
+# The repository address must survive a broken MagicDNS resolver, so the name is
+# pinned in the hosts file. The tailnet address of the server is stable per node;
+# override with RUNNEOS_REPO_IP when the server moves.
+ensure_repository_host() {
+	python3 - "$1" "$2" "$hosts_conf" <<'PY'
+import pathlib, sys, urllib.parse
+url, ip, hosts_path = sys.argv[1], sys.argv[2], sys.argv[3]
+host = urllib.parse.urlsplit(url).hostname or ''
+hosts = pathlib.Path(hosts_path)
+text = hosts.read_text() if hosts.exists() else ''
+pinned = any(len(fields) > 1 and fields[1] == host
+             for fields in (line.split() for line in text.splitlines() if line.strip() and not line.startswith('#')))
+if pinned:
+	raise SystemExit(0)
+with hosts.open('a') as handle:
+	handle.write(f'\n# RunneOS package repository: MagicDNS can be overwritten by NetworkManager.\n{ip} {host}\n')
+PY
+}
+
+# Rewrite the [runneos] stanza to the real server, or comment it out. The third
+# argument is the reason written into the comment when the section is disabled:
+# "the server does not answer" and "this stanza came from the live medium" are
+# different stories for whoever reads pacman.conf later.
+write_repository_stanza() {
+	python3 - "$1" "${2:-yes}" "$pacman_conf" "${3:-сервер RunneOS недоступен}" <<'PY'
+import re, sys, pathlib
+conf = pathlib.Path(sys.argv[3])
+text = conf.read_text()
+if sys.argv[2] == 'yes':
+	body = f'[runneos]\nSigLevel = Optional TrustAll\nServer = {sys.argv[1]}/$arch\n'
+else:
+	body = (f'#[runneos] выключен: {sys.argv[4]}.\n'
+	        '# Обновления пакетов runneos-* появятся, когда сервер будет доступен;\n'
+	        '# раскомментируйте раздел и укажите рабочий Server.\n'
+	        f'#[runneos]\n#SigLevel = Optional TrustAll\n#Server = {sys.argv[1]}/$arch\n')
+text = re.sub(r'(?:#)?\[runneos\][^\[]*', body, text, count=1)
+conf.write_text(text)
+PY
+}
+
+# Append the [runneos] stanza to a configuration that has none.
+append_repository_stanza() {
+	python3 - "$1" "$pacman_conf" <<'PY'
+import sys, pathlib
+conf = pathlib.Path(sys.argv[2])
+with conf.open('a') as handle:
+	handle.write(f'\n[runneos]\nSigLevel = Optional TrustAll\nServer = {sys.argv[1]}/$arch\n')
+PY
+}
+
+echo "RunneOS post-install ($([[ $apply == 1 ]] && echo apply || echo check))"
+
+# 1. Repository. The live medium serves [runneos] from file:///runneos-repo, a
+#    path that does not exist on an installed system: left as-is, every later
+#    pacman transaction fails. Point it at the real server when it answers,
+#    otherwise leave it off and say why.
+#    A stanza naming the live medium has to go whatever the probe says: that
+#    path is dead by definition, so an unresolvable server name (code 2) is no
+#    reason to keep it. Skipping the step there would leave pacman broken on
+#    every later transaction — exactly the failure this step exists to prevent.
+if [[ -f $pacman_conf ]] && grep -qE '^#?\[runneos\]' "$pacman_conf"; then
+	if grep -A4 -E '^#?\[runneos\]' "$pacman_conf" | grep -q '/runneos-repo'; then
+		state=0; repository_reachable "$server/$arch/runneos.db" || state=$?
+		case $state in
+			0) act "переключить [runneos] на $server" write_repository_stanza "$server" yes
+			   act "закрепить имя сервера в $hosts_conf" ensure_repository_host "$server" "$server_ip" ;;
+			1) act "отключить [runneos]: сервер $server не отвечает" \
+			     write_repository_stanza "$server" no "сервер RunneOS не отвечает"
+			   note 'note' "пакеты runneos-* остаются установленными, обновлений пока не будет" ;;
+			2) act "отключить [runneos]: раздел указывал на live-носитель" \
+			     write_repository_stanza "$server" no "раздел остался от live-носителя, а имя ${server#*//} здесь не разрешается"
+			   note 'note' "пакеты runneos-* остаются установленными, обновлений пока не будет" ;;
+			*) note 'note' "сервер не проверен — раздел не тронут" ;;
+		esac
+	else
+		note 'ok' "[runneos] не ссылается на live-носитель"
+	fi
+else
+	# No stanza at all. Add one when the server answers, so any machine of ours
+	# can start using the repository with a single command. The step is reported
+	# like any other and never runs in check mode.
+	state=0; repository_reachable "$server/$arch/runneos.db" || state=$?
+	case $state in
+		0) act "добавить [runneos] ($server) в $pacman_conf" append_repository_stanza "$server"
+		   act "закрепить имя сервера в $hosts_conf" ensure_repository_host "$server" "$server_ip" ;;
+		1) note 'note' "раздела [runneos] нет, сервер $server не отвечает — ничего не добавлено" ;;
+		*) note 'note' "раздела [runneos] нет, имя $server не разрешается — ничего не добавлено" ;;
+	esac
+fi
+
+# 2. Display manager. The desktop metapackage deliberately does not choose one.
+if [[ -e /etc/systemd/system/display-manager.service ]]; then
+	note 'ok' "дисплей-менеджер уже выбран: $(readlink -f /etc/systemd/system/display-manager.service | xargs -r basename)"
+elif [[ -f /usr/lib/systemd/system/sddm.service ]]; then
+	if command -v systemctl >/dev/null 2>&1; then
+		act "включить sddm как display-manager" systemctl enable sddm.service
+	else
+		act "включить sddm как display-manager" ln -sfn /usr/lib/systemd/system/sddm.service /etc/systemd/system/display-manager.service
+	fi
+else
+	note 'FAILED' "sddm не установлен — графического входа не будет"
+	problems=$((problems+1))
+fi
+
+# 3. Snapshots. The design assumes btrfs + snapper; both are only useful once
+#    the root configuration exists.
+#
+#    snapper cannot create that configuration from the installer: it looks the
+#    subvolume up by mount point in /proc/self/mountinfo, and inside the chroot
+#    the future root is mounted as /mnt/archinstall, not as /. It fails with
+#    "subvolume is not a btrfs subvolume" no matter how the chroot is entered.
+#    The packaged unit runneos-snapper-firstboot.service does the same work on
+#    the first boot of the installed system, which is also what the Arch wiki
+#    recommends.
+if command -v snapper >/dev/null 2>&1; then
+	if findmnt -no FSTYPE / 2>/dev/null | grep -q btrfs; then
+		if snapper list-configs 2>/dev/null | grep -q '^root'; then
+			note 'ok' "конфигурация snapper root существует"
+		elif snapper -c root create-config / >/dev/null 2>&1; then
+			note 'applied' "создать конфигурацию snapper root"
+		elif [[ -f /usr/lib/systemd/system/runneos-snapper-firstboot.service ]]; then
+			act "включить создание конфигурации snapper при первом запуске" \
+				systemctl enable runneos-snapper-firstboot.service
+			note 'note' "в установщике snapper не видит подтом: конфигурацию создаст первый запуск"
+		else
+			note 'FAILED' "ни snapper, ни runneos-snapper-firstboot.service не настроили снимки"
+			problems=$((problems+1))
+		fi
+		if systemctl is-enabled --quiet snapper-timeline.timer snapper-cleanup.timer 2>/dev/null; then
+			note 'ok' "таймеры snapper включены"
+		else
+			act "включить таймеры snapper" systemctl enable snapper-timeline.timer snapper-cleanup.timer
+		fi
+	else
+		note 'note' "корень не btrfs — снимки Snapper недоступны"
+	fi
+else
+	note 'note' "snapper не установлен"
+fi
+
+# 4. The packaged profile for new users must be in place before the first login.
+if [[ -f /etc/skel/.config/niri/config.kdl && -f /etc/skel/.config/ghostty/config ]]; then
+	note 'ok' "профиль /etc/skel на месте (Niri, Ghostty)"
+else
+	note 'FAILED' "в /etc/skel нет профиля RunneOS — проверьте пакет runneos-config"
+	problems=$((problems+1))
+fi
+
+# 5. Theme defaults are compiled into /etc/dconf/db/local by the package.
+if [[ -f /etc/dconf/db/local.d/00-runneos-interface ]]; then
+	ok_or "$([[ -f /etc/dconf/db/local ]] && echo 1 || echo 0)" \
+		"dconf-база собрана" "собрать dconf-базу (dconf update)"
+	(( apply )) && [[ ! -f /etc/dconf/db/local ]] && dconf update >/dev/null 2>&1 || true
+else
+	note 'note' "dconf-дефолтов RunneOS нет"
+fi
+
+echo
+if (( problems )); then
+	echo "Осталось проблем: $problems"
+else
+	echo "Проблем не найдено."
+fi
+echo "После первого входа в сеанс DMS: runneos-install-dms-plugins (плагины и виджет AI Usage)."
+exit $(( problems > 0 ? 1 : 0 ))

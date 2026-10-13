@@ -1,0 +1,26 @@
+[Desktop Entry]
+Type=Application
+Name=RunneOS Software
+Name[ru]=Программы RunneOS
+GenericName=Software Center
+GenericName[ru]=Центр приложений
+Comment=Find, install and update your applications
+Comment[ru]=Поиск, установка и обновление приложений
+Exec=runneos-software
+Icon=runneos-software
+Terminal=false
+Categories=System;PackageManager;
+Keywords=software;apps;store;packages;aur;flatpak;программы;приложения;магазин;обновления;
+StartupNotify=true
+StartupWMClass=org.runneos.Software
+Actions=Installed;Updates;
+
+[Desktop Action Installed]
+Name=Installed applications
+Name[ru]=Установленные приложения
+Exec=runneos-software --page installed
+
+[Desktop Action Updates]
+Name=Updates
+Name[ru]=Обновления
+Exec=runneos-software --page updates

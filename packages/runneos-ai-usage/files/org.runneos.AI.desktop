@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=RunneOS AI
+Name[ru]=AI · RunneOS
+Comment=Account limits, API balances and local usage
+Comment[ru]=Лимиты аккаунтов, балансы API и локальная история
+Exec=runneos-ai
+Icon=utilities-system-monitor
+Terminal=false
+Categories=Utility;
+Keywords=AI;limits;balances;Codex;лимиты;баланс;
+StartupNotify=true

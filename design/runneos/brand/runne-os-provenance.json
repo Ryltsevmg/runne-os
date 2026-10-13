@@ -1,0 +1,19 @@
+{
+  "source": "/home/ryltsevmg/Projects/runne/design/runne-ui.pen",
+  "date": "2026-10-11",
+  "label": "Runne.OS",
+  "baseComponent": "OPea5",
+  "modification": "User-approved Pen redesign: original Runne paths, Inter Tight 700 OS suffix, raised 12px separator. Carbon ink #F0F1F4 / dot #7C8AFF; Cloud ink #111214 / dot #4055F5. Installed wordmarks are transparent exports; these PNGs retain presentation backdrops.",
+  "exports": [
+    {
+      "file": "runne-os-carbon.png",
+      "node": "AZziy",
+      "sha256": "b12fe8f0748905caa98ac5ad469ff5ebcdb6a11f07ebfacb63549a1e378244d2"
+    },
+    {
+      "file": "runne-os-cloud.png",
+      "node": "Blo6R",
+      "sha256": "24d0f7611315c95a714b02c1e7f9d66dda4ee591a0cacc5083c5b829810a9ffc"
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+#!/bin/bash
+# RunneOS installation, driven from the live medium.
+#
+#   sudo ./runneos-install [--config FILE] [--creds FILE]
+#
+# Wraps archinstall with the RunneOS profile in user_configuration.json. The
+# disk is deliberately NOT in the profile: archinstall asks which device to use
+# and confirms before touching it. Credentials are asked interactively unless
+# --creds points at an archinstall credentials file.
+#
+# The RunneOS-specific steps after installation are performed by
+# `runneos-post-install --apply`, which the profile lists in custom_commands and
+# which is shipped by the runneos-config package inside the new system.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+config=$here/user_configuration.json
+creds=()
+
+while (( $# )); do
+	case "$1" in
+		--config) config=$2; shift 2 ;;
+		--creds) creds=(--creds "$2"); shift 2 ;;
+		-h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		*) echo "неизвестный аргумент: $1" >&2; exit 2 ;;
+	esac
+done
+
+[[ $EUID -eq 0 ]] || { echo 'нужен root: sudo ./runneos-install' >&2; exit 1; }
+[[ -f $config ]] || { echo "нет файла конфигурации: $config" >&2; exit 1; }
+
+# The local package repository is served by the live medium. Without it the
+# runneos-* packages in the profile cannot be resolved.
+if ! grep -q '^\[runneos\]' /etc/pacman.conf; then
+	echo 'в /etc/pacman.conf нет раздела [runneos]: пакеты RunneOS не разрешатся.' >&2
+	echo 'Запускайте установку с live-образа RunneOS, а не с чужого носителя.' >&2
+	exit 1
+fi
+
+echo 'Профиль RunneOS: Niri + DMS, терминал Ghostty, загрузчик Limine, zram.'
+echo 'Диск archinstall спросит отдельно и попросит подтверждение.'
+echo
+
+exec archinstall --config "$config" "${creds[@]}"

@@ -1,0 +1,31 @@
+[Unit]
+Description=RunneOS: создать конфигурацию snapper для корня
+Documentation=man:snapper(8)
+# Две причины не делать это в установщике, обе проверены 2026-10-12:
+#   * snapper ищет подтом по точке монтирования в /proc/self/mountinfo, а в
+#     установочном chroot будущий корень смонтирован как /mnt/archinstall —
+#     отсюда «IO Error (subvolume is not a btrfs subvolume)», хотя
+#     `btrfs subvolume show /` отвечает корректно;
+#   * в chroot нет системной шины DBus, а snapper работает через snapperd
+#     (`org.freedesktop.DBus.Error.FileNotFound`).
+# Поэтому конфигурацию создаёт первый запуск установленной системы — так же
+# советует вики Arch.
+#
+# ExecStartPost с `systemctl --now` здесь стоял и вешал загрузку: запуск таймера
+# из юнита блокировал его на минуты. Таймеры snapper включает постустановочный
+# шаг, юниту достаточно создать конфигурацию.
+ConditionPathExists=!/etc/snapper/configs/root
+ConditionPathIsMountPoint=/
+After=local-fs.target
+Before=snapper-timeline.timer snapper-cleanup.timer
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+StandardInput=null
+# Страховка: если snapper почему-то не завершится, загрузка не ждёт его вечно.
+TimeoutStartSec=120
+ExecStart=/usr/bin/snapper -c root create-config /
+
+[Install]
+WantedBy=multi-user.target

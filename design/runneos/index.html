@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru" data-theme="carbon">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>RunneOS — Carbon / Cloud · дизайн-прототип</title>
+  <link rel="stylesheet" href="tokens.css"><link rel="stylesheet" href="preview.css">
+  <script src="preview.js" defer></script>
+</head>
+<body>
+  <header class="review-toolbar">
+    <div><strong>RunneOS / Design Preview</strong><span class="demo-tag">ДЕМО</span></div>
+    <div class="review-controls">
+      <label>Тема <select id="theme"><option value="carbon">Carbon</option><option value="cloud">Cloud</option></select></label>
+      <label>AI-состояние <select id="scenario"><option value="ready">Данные получены</option><option value="stale">Нет сети · старые данные</option><option value="auth">Нужен вход</option><option value="low">Мало ресурса</option><option value="empty">Нет подключений</option><option value="loading">Первое обновление</option><option value="unknown">Квота неизвестна</option><option value="zero">Баланс равен нулю</option></select></label>
+    </div>
+  </header>
+  <p class="review-note">Интерактивный макет. Все аккаунты и цифры демонстрационные. Нет запросов к провайдерам, ключи не принимаются, настройки ОС не меняются.</p>
+  <div class="desktop-shell">
+    <div class="system-bar">
+      <button class="brand-button" id="home" aria-label="Обзор RunneOS"><img class="route-mark carbon-only" src="brand/launcher-carbon.png" alt=""><img class="route-mark cloud-only" src="brand/launcher-cloud.png" alt=""><strong>RunneOS</strong></button>
+      <span class="workspace-tabs" aria-label="Рабочие контексты"><button class="workspace active" data-space="Работа">Работа</button><button class="workspace" data-space="Личное">Личное</button></span>
+      <span class="bar-spacer"></span>
+      <button id="ai-toggle" class="ai-pill" aria-haspopup="dialog" aria-expanded="false"><span class="dot"></span><span id="bar-summary">AI · 5ч осталось 62%</span></button>
+      <span class="clock">21:40</span>
+      <button id="settings-shortcut" class="icon-button" aria-label="Настройки">⚙</button>
+    </div>
+    <div class="window-shell">
+      <aside class="sidebar">
+        <div class="brand"><img class="brand-wordmark carbon-only" src="brand/wordmark-carbon.png" alt="Runne"><img class="brand-wordmark cloud-only" src="brand/wordmark-cloud.png" alt="Runne"><span class="eyebrow">РАБОЧАЯ СРЕДА</span></div>
+        <nav aria-label="Разделы макета">
+          <button data-view="overview" class="nav-item active"><span aria-hidden="true">▦</span> Обзор</button>
+          <button data-view="accounts" class="nav-item"><span aria-hidden="true">◈</span> AI-аккаунты <span class="count" id="account-count">2</span></button>
+          <button data-view="programs" class="nav-item"><span aria-hidden="true">⊞</span> Программы</button>
+          <button data-view="settings" class="nav-item"><span aria-hidden="true">⚙</span> Настройки</button>
+        </nav>
+        <div class="sidebar-bottom"><span class="eyebrow">RUNNE RUNTIME</span><p>Будущая интеграция</p><small>Рабочий стол независим от AI.</small></div>
+      </aside>
+      <main id="main" tabindex="-1"></main>
+    </div>
+    <dialog id="ai-popup" aria-labelledby="popup-title">
+      <div class="popup-heading"><div><span class="eyebrow">БЫСТРЫЙ ОБЗОР</span><h2 id="popup-title">Ваш AI-ресурс</h2></div><button id="popup-close" class="icon-button" aria-label="Закрыть AI-обзор">×</button></div>
+      <div id="popup-body"></div>
+      <div class="popup-footer"><button id="popup-details" class="quiet-button">Все аккаунты →</button><span class="demo-tag">ДЕМО-ДАННЫЕ</span></div>
+    </dialog>
+    <dialog id="connect-dialog" aria-labelledby="connect-title">
+      <div class="popup-heading"><h2 id="connect-title">Добавить аккаунт</h2><button id="connect-close" class="icon-button" aria-label="Закрыть подключение">×</button></div>
+      <p class="muted">Выберите продукт — не только название компании. В рабочей версии мастер покажет доступные метрики и нужные разрешения.</p>
+      <label class="field-label">Продукт<select id="product"><option>Codex · подписка</option><option>Claude · подписка</option><option>DeepSeek · API</option><option>OpenRouter · бюджет ключа</option><option>Kimi Code · подписка</option><option>Moonshot · API</option></select></label>
+      <div class="callout"><strong>Безопасное подключение</strong><p>Ключ хранится в GNOME Keyring. В конфигурации — только ссылка. OAuth другого приложения не превращается в API-ключ.</p></div>
+      <p class="muted">Этот макет не принимает секреты и не подключает аккаунты. Форму ввода ключа намеренно не показываем.</p>
+      <button id="connect-done" class="primary">Понятно</button>
+    </dialog>
+  </div>
+  <footer class="review-footer">Runne Identity · Cobalt #315CFF · Carbon / Cloud · Оригинальные компоненты Runne экспортированы через Pencil MCP.</footer>
+</body>
+</html>

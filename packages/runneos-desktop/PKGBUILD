@@ -1,0 +1,20 @@
+pkgname=runneos-desktop
+pkgver=0.0.11
+pkgrel=2
+pkgdesc="Runne OS desktop metapackage"
+arch=("any")
+license=("MIT")
+depends=("niri" "dms-shell" "ghostty" "xwayland-satellite"
+         "xdg-desktop-portal-gtk" "xdg-desktop-portal-gnome" "gnome-keyring" "seahorse" "bitwarden"
+         "pipewire" "pipewire-pulse" "wireplumber" "polkit" "wtype"
+         "nautilus" "tmux" "neovim" "btop"
+         "inter-font" "ttf-jetbrains-mono" "snapper" "snap-pac" "runneos-config"
+         "runneos-ai-usage" "runneos-software" "runneos-theme" "runneos-tools" "gpu-screen-recorder" "ffmpeg" "libxkbcommon" "xkeyboard-config")
+# The browser is not a hard dependency: the desktop is complete without a
+# specific one, the workstation runs Firefox and Chrome as Flatpaks, and a hard
+# native dependency would install a second browser next to them. The ISO lists
+# firefox explicitly instead, so a fresh install still has a browser.
+optdepends=("firefox: браузер по умолчанию" "sddm: дисплей-менеджер для установленной системы")
+package() {
+  :
+}

@@ -1,0 +1,62 @@
+{
+  "repository": "https://github.com/Ryltsevmg/runne-os",
+  "commit": "b5bfb915c978f3b575f74df6ac6540055a0804aa",
+  "source": "design/runne-ui.pen",
+  "license": "MIT; exported owner-provided Runne design components, not Pen application assets",
+  "method": "Pencil MCP Export; original archive components unchanged; OS variants locally revised and approved 2026-10-11",
+  "exports": [
+    {
+      "file": "wordmark-carbon.png",
+      "node": "AZziy",
+      "sha256": "86e6c5f859936134425a52f90ff944bfc35133c39ddee95f7d23abed288dd88b",
+      "exportNode": "x8gC4",
+      "derivation": "Transparent Pen reference instance; presentation background omitted, lettering/colors/spacing unchanged",
+      "revision": "Local Pen revision approved 2026-10-11, not contained in pinned archive commit",
+      "label": "Runne.OS",
+      "dimensions": [
+        1848,
+        432
+      ]
+    },
+    {
+      "file": "glyph-carbon.png",
+      "node": "C9sQTI",
+      "sha256": "9757c016e056de88be404aca951a417796eb44344acc99aec6883758ae2cb2e0"
+    },
+    {
+      "file": "glyph-cloud.png",
+      "node": "FGyNH",
+      "sha256": "c5ea01cd4f7a4651c0cd06cf6d03817bc28d2b75183af2443831f9ee8bbe7575"
+    },
+    {
+      "file": "mascot-idle.png",
+      "node": "Q9Q8E",
+      "sha256": "43fe64725d15d947b6428773d00908b313171344b729c20ad82929de85c7c31f"
+    },
+    {
+      "file": "wordmark-cloud.png",
+      "node": "Blo6R",
+      "derivation": "Transparent Pen reference instance; presentation background omitted, lettering/colors/spacing unchanged",
+      "sha256": "9cd836ad006be7e509583a305c10fd3488660c70a22d60d80471c5872848a34e",
+      "exportNode": "ZLIdx",
+      "revision": "Local Pen revision approved 2026-10-11, not contained in pinned archive commit",
+      "label": "Runne.OS",
+      "dimensions": [
+        1848,
+        432
+      ]
+    },
+    {
+      "file": "launcher-carbon.png",
+      "node": "C9sQTI",
+      "derivation": "Transparent square padding only, preserves source image proportions",
+      "sha256": "d21ca182610717c3f26da9b1a94113e93f734c2ab715c489f5ab30926f50272f"
+    },
+    {
+      "file": "launcher-cloud.png",
+      "node": "FGyNH",
+      "derivation": "Transparent square padding only, preserves source image proportions",
+      "sha256": "451250a3a5709141c85c68d34663769d2300c4c765d96607caecbdc725e9a323"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+# RunneOS: user settings are read on top of the system defaults shipped in
+# /etc/dconf/db/local.d. Without this profile the system database is ignored
+# and only the per-user database applies.
+user-db:user
+system-db:local

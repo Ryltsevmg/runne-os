@@ -1,0 +1,11 @@
+# RunneOS interface defaults. The icon and cursor themes are the WhiteSur
+# builds that runneos-whitesur-icons and runneos-whitesur-cursors provide;
+# runneos-config depends on both, so these references cannot dangle.
+#
+# This replaced a broken state: the machine pointed at "breeze" and
+# "breeze_cursors" after Breeze was removed together with KDE, and GTK silently
+# fell back to hicolor while 348 MiB of theme packages sat unused.
+[org/gnome/desktop/interface]
+gtk-theme='Adwaita'
+icon-theme='WhiteSur'
+cursor-theme='WhiteSur-cursors'

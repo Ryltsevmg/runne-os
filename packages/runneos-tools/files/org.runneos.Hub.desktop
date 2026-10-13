@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=RunneOS Hub
+Name[ru]=Центр управления RunneOS
+Exec=runneos-hub
+Icon=preferences-system
+Terminal=false
+Categories=Settings;System;
+Keywords=Runne;doctor;diagnostics;диагностика;управление;

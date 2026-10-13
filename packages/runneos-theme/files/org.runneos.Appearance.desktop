@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=RunneOS Appearance
+Name[ru]=Оформление RunneOS
+Comment=Carbon and Cloud themes
+Comment[ru]=Фирменные темы Carbon и Cloud
+Exec=runneos-appearance
+Icon=preferences-desktop-theme
+Terminal=false
+Categories=Settings;DesktopSettings;

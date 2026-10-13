@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="3840" height="2160" viewBox="0 0 3840 2160">
+  <rect width="3840" height="2160" fill="#E7EAEE"/>
+  <path d="M-120 1760H1040a280 280 0 0 0 280-280V680a280 280 0 0 1 280-280H3960" fill="none" stroke="#F5F6F7" stroke-width="140"/>
+  <path d="M-120 1760H1040a280 280 0 0 0 280-280V680a280 280 0 0 1 280-280H3960" fill="none" stroke="#B7BEC9" stroke-width="2"/>
+  <path d="M-120 1880H1160a280 280 0 0 0 280-280V800a280 280 0 0 1 280-280H3960" fill="none" stroke="#D2D7DE" stroke-width="2"/>
+  <circle cx="1600" cy="400" r="20" fill="#315CFF"/>
+  <circle cx="1040" cy="1760" r="8" fill="#535D6B"/>
+  <image href="brand/launcher-cloud.png" x="3190" y="1510" width="240" height="240"/>
+</svg>

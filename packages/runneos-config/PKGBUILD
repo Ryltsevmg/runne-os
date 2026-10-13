@@ -1,0 +1,37 @@
+pkgname=runneos-config
+pkgver=0.0.12
+pkgrel=10
+pkgdesc="Runne OS system configuration"
+arch=('any')
+license=('MIT')
+# dconf carries the interface defaults below; the WhiteSur packages provide the
+# icon and cursor themes those defaults name, so they are hard dependencies and
+# the references cannot dangle.
+depends=('python' 'xdg-utils' 'runneos-theme' 'dconf'
+         'runneos-whitesur-icons' 'runneos-whitesur-cursors')
+install="$pkgname.install"
+source=('os-release')
+sha256sums=('SKIP')
+package() {
+  install -Dm644 "$srcdir/os-release" "$pkgdir/usr/lib/runneos/os-release"
+  install -Dm644 "$startdir/files/ghostty-config" "$pkgdir/etc/skel/.config/ghostty/config"
+  install -Dm755 "$startdir/../../scripts/runneos-terminal.py" "$pkgdir/usr/bin/runneos-terminal"
+  install -Dm644 "$startdir/files/runneos-terminal.desktop" "$pkgdir/usr/share/applications/runneos-terminal.desktop"
+  install -Dm644 "$startdir/files/90-runneos-terminal.conf" "$pkgdir/etc/skel/.config/environment.d/90-runneos-terminal.conf"
+  install -Dm644 "$startdir/files/xdg-terminals.list" "$pkgdir/etc/xdg/xdg-terminals.list"
+  install -Dm644 "$startdir/files/niri-config.kdl" "$pkgdir/etc/skel/.config/niri/config.kdl"
+  install -Dm644 "$startdir/files/niri-bindings.kdl" "$pkgdir/etc/skel/.config/niri/niri-bindings.kdl"
+  install -Dm644 "$startdir/files/dms-settings.json" "$pkgdir/etc/skel/.config/DankMaterialShell/settings.json"
+  install -Dm644 "$startdir/files/dms-plugins.lock.json" "$pkgdir/usr/share/runneos/dms/dms-plugins.lock.json"
+  install -Dm644 "$startdir/files/dms-plugin-settings.json" "$pkgdir/usr/share/runneos/dms/dms-plugin-settings.json"
+  install -Dm644 "$startdir/files/dconf-profile-user" "$pkgdir/etc/dconf/profile/user"
+  install -Dm644 "$startdir/files/dconf-00-runneos-interface" "$pkgdir/etc/dconf/db/local.d/00-runneos-interface"
+  install -Dm755 "$startdir/../../scripts/install-dms-plugins.py" "$pkgdir/usr/bin/runneos-install-dms-plugins"
+  install -Dm755 "$startdir/files/runneos-post-install" "$pkgdir/usr/bin/runneos-post-install"
+  # snapper cannot create the root configuration from the installer chroot; this
+  # unit does it on the first boot of the installed system.
+  install -Dm644 "$startdir/files/runneos-snapper-firstboot.service" \
+    "$pkgdir/usr/lib/systemd/system/runneos-snapper-firstboot.service"
+  install -d "$pkgdir/etc/systemd/user/graphical-session.target.wants"
+  ln -s /usr/lib/systemd/user/dms.service "$pkgdir/etc/systemd/user/graphical-session.target.wants/dms.service"
+}

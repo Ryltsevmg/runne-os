@@ -1,0 +1,24 @@
+{
+  "favorites": [],
+  "providers": {
+    "clipboard": {
+      "enabled": false,
+      "preferences": { "monitoring": false }
+    }
+  },
+  "font": {
+    "normal": { "family": "Inter", "size": 11 }
+  },
+  "theme": {
+    "light": { "name": "runneos-light", "icon_theme": "WhiteSur" },
+    "dark": { "name": "runneos-light", "icon_theme": "WhiteSur" }
+  },
+  "launcher_window": {
+    "opacity": 0.9,
+    "material": "blur",
+    "rounding": 14,
+    "client_side_decorations": { "enabled": true, "border_width": 1, "shadow_size": 16 },
+    "compact_mode": { "enabled": false },
+    "size": { "width": 720, "height": 450 }
+  }
+}

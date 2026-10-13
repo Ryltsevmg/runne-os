@@ -1,0 +1,8 @@
+{"type": "thread.started", "thread_id": "00000000-0000-4000-8000-000000000004"}
+{"type": "user_message", "text": "назови число 42"}
+{"type": "turn.started"}
+{"type": "error", "message": "Reconnecting... 2/5 (stream disconnected before completion: Connection reset by peer (os error 104))"}
+{"type": "error", "message": "Reconnecting... 3/5 (stream disconnected before completion: Connection reset by peer (os error 104))"}
+{"type": "error", "message": "Reconnecting... 4/5 (stream disconnected before completion: Connection reset by peer (os error 104))"}
+{"type": "item.completed", "item": {"id": "item_0", "type": "agent_message", "text": "42"}}
+{"type": "turn.completed", "usage": {"input_tokens": 28746, "cached_input_tokens": 14208, "cache_write_input_tokens": 0, "output_tokens": 11, "reasoning_output_tokens": 0}}

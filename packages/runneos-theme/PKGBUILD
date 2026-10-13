@@ -1,0 +1,32 @@
+pkgname=runneos-theme
+pkgver=0.2.0
+pkgrel=6
+pkgdesc='RunneOS Carbon/Cloud themes and original Runne identity assets'
+arch=('any')
+license=('MIT')
+depends=('python' 'python-gobject' 'gtk4' 'libadwaita')
+makedepends=('python' 'librsvg')
+build() {
+  python "$startdir/files/generate.py" --output "$srcdir/generated"
+  for mode in carbon cloud; do
+    rsvg-convert "$startdir/files/wallpaper-$mode.svg" -o "$srcdir/generated/wallpaper-$mode.png"
+  done
+}
+check() {
+  PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s "$startdir/../../tests" -p test_theme.py -v
+  PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s "$startdir/../../tests" -p test_ui_style.py -v
+}
+package() {
+  install -Dm755 "$startdir/files/apply.py" "$pkgdir/usr/bin/runneos-theme"
+  install -Dm755 "$startdir/files/appearance.py" "$pkgdir/usr/bin/runneos-appearance"
+  install -Dm644 "$startdir/files/org.runneos.Appearance.desktop" "$pkgdir/usr/share/applications/org.runneos.Appearance.desktop"
+  install -Dm644 "$startdir/files/tokens.json" "$pkgdir/usr/share/runneos/theme/tokens.json"
+  install -Dm644 "$startdir/files/ui_style.py" "$pkgdir/usr/share/runneos/theme/ui_style.py"
+  for file in "$startdir/files/brand/"*; do
+    install -Dm644 "$file" "$pkgdir/usr/share/runneos/theme/brand/$(basename "$file")"
+  done
+  for file in "$srcdir/generated/"*; do
+    install -Dm644 "$file" "$pkgdir/usr/share/runneos/theme/$(basename "$file")"
+  done
+  install -Dm644 "$startdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

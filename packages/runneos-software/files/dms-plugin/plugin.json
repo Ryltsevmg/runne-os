@@ -1,0 +1,14 @@
+{
+  "id": "runneosSoftware",
+  "name": "Программы RunneOS",
+  "description": "Открыть центр приложений RunneOS",
+  "version": "0.1.0",
+  "author": "RunneOS",
+  "icon": "apps",
+  "type": "widget",
+  "capabilities": ["dankbar-widget"],
+  "component": "./SoftwareLauncher.qml",
+  "permissions": ["process"],
+  "requires": ["runneos-software"],
+  "requires_dms": ">=1.6.3"
+}

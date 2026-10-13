@@ -1,0 +1,9 @@
+{
+  "currentThemeName": "custom",
+  "customThemeFile": "/usr/share/runneos/theme/dms-theme.json",
+  "weatherLocation": "Москва",
+  "weatherCoordinates": "55.7558,37.6173",
+  "useAutoLocation": false,
+  "_legacyWeatherLocation": "Москва",
+  "_legacyWeatherCoordinates": "55.7558,37.6173"
+}

@@ -1,0 +1,29 @@
+{
+  "package": "runneos-ai-providers",
+  "version": "0.1.0-1",
+  "created": "2026-10-13",
+  "providers": [
+    {
+      "name": "codex",
+      "version": "0.162.1",
+      "source": "https://github.com/openai/codex/releases/download/rust-v0.162.1/codex-x86_64-unknown-linux-musl.tar.gz",
+      "asset_sha256": "86f268d81b898f3e144c5ecff2ad2fda2c5802e042d6195b72538fe0fa125057",
+      "digest_source": "GitHub API releases/latest (assets[].digest)",
+      "binary_path_in_source": "codex-x86_64-unknown-linux-musl",
+      "license": "Apache-2.0",
+      "install_path": "/usr/bin/codex"
+    },
+    {
+      "name": "opencode",
+      "version": "2.0.26",
+      "source": "https://registry.npmjs.org/@opencode/cli-linux-x64/-/cli-linux-x64-2.0.26.tgz",
+      "tarball_sha256": "0a116e033a02804741d4644337d012bdf5a24aac33a34c0c96534d2d53961119",
+      "npm_integrity_sha512": "UIA2/1Ik8HaN54C4xp7H+OHgRfq995XUixrX+kLmFs8EPn1fAcmn3OoiN+3c3Vc3jEV/LHmj0Cy1SL6nW4wdGw==",
+      "digest_source": "npm registry dist.integrity",
+      "binary_path_in_source": "package/bin/opencode",
+      "license": "MIT",
+      "install_path": "/usr/bin/opencode"
+    }
+  ],
+  "notes": "Версия opencode запинена на 2.0.26 — совпадает с установленной на рабочих машинах и с фикстурами адаптеров runneos-agents. Обновление пина — по README."
+}

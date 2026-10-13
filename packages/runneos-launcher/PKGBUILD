@@ -1,0 +1,15 @@
+pkgname=runneos-launcher
+pkgver=0.1.0
+pkgrel=2
+pkgdesc='Focus-or-launch entry point for RunneOS desktop applications'
+arch=('any')
+license=('MIT')
+depends=('python' 'python-gobject' 'glib2' 'niri')
+optdepends=('flatpak: scoped Flatpak launch support')
+check() {
+  PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s "$startdir/../../tests" -p test_launcher.py -v
+}
+package() {
+  install -Dm755 "$startdir/files/launcher.py" "$pkgdir/usr/bin/runneos-launch"
+  install -Dm644 "$startdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

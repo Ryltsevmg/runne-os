@@ -1,0 +1,41 @@
+# Runne OS light theme for Vicinae (macOS Spotlight / WhiteSur light)
+[meta]
+name = "Runne OS Light"
+description = "macOS-like light palette matching WhiteSur"
+variant = "light"
+inherits = "vicinae-light"
+
+[colors.core]
+accent = "#007aff"
+accent_foreground = "#ffffff"
+background = "#f5f5f7"
+foreground = "#1d1d1f"
+secondary_background = "#ebebef"
+border = "#d2d2d7"
+
+[colors.main_window]
+border = "#d2d2d7"
+footer = { background = "#ececf0" }
+
+[colors.settings_window]
+border = "#d2d2d7"
+
+[colors.text]
+default = "#1d1d1f"
+muted = "#6e6e73"
+placeholder = "#8e8e93"
+selection = { background = "#b3d7ff", foreground = "#1d1d1f" }
+
+[colors.input]
+border = "#d2d2d7"
+border_focus = "#007aff"
+
+[colors.list.item.hover]
+foreground = "#1d1d1f"
+secondary_foreground = "#1d1d1f"
+
+[colors.list.item.selection]
+background = "#007aff"
+foreground = "#ffffff"
+secondary_background = "#007aff"
+secondary_foreground = "#ffffff"

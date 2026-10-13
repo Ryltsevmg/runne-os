@@ -1,0 +1,133 @@
+// RunneOS: standard hotkeys mapped to Niri + DMS.
+// Source and differences: .agents/skills/runneos/references/bindings.md
+binds {
+    Mod+Space { spawn "dms" "ipc" "call" "launcher" "toggle"; }
+    Alt+Space { switch-layout "next"; }
+    Mod+Alt+Space { spawn "dms" "ipc" "call" "launcher" "toggle"; }
+    Alt+Left { focus-column-left; }
+    Alt+Right { focus-column-right; }
+    Alt+Up { focus-window-up; }
+    Alt+Down { focus-window-down; }
+    Mod+Escape { spawn "dms" "ipc" "call" "powermenu" "toggle"; }
+    Mod+Ctrl+L { spawn "dms" "ipc" "call" "lock" "lock"; }
+    Mod+K { spawn "dms" "ipc" "call" "keybinds" "toggle" "niri"; }
+    Mod+Return { spawn "runneos-terminal"; }
+    Mod+Alt+Return { spawn "runneos-terminal" "-e" "tmux" "new-session" "-A" "-s" "main"; }
+    Mod+Shift+Return { spawn "dms" "ipc" "call" "defaultApp" "browser"; }
+    Mod+Shift+F { spawn "dms" "ipc" "call" "defaultApp" "fileManager"; }
+    Mod+Shift+N { spawn "runneos-terminal" "-e" "nvim"; }
+    Mod+Shift+M { spawn "dms" "ipc" "call" "defaultApp" "musicPlayer"; }
+    Mod+Shift+C { spawn "dms" "ipc" "call" "defaultApp" "calendar"; }
+    Mod+Shift+E { spawn "dms" "ipc" "call" "defaultApp" "mail"; }
+    Mod+W { close-window; }
+    Mod+Q { close-window; }
+    Mod+T { toggle-window-floating; }
+    Mod+F { fullscreen-window; }
+    Mod+Alt+F { maximize-column; }
+    Mod+Ctrl+F { toggle-windowed-fullscreen; }
+    Mod+Tab { focus-workspace-down; }
+    Mod+Shift+Tab { focus-workspace-up; }
+    Mod+Ctrl+Tab { focus-workspace-previous; }
+    Mod+1 { focus-workspace 1; }
+    Mod+Shift+1 { move-window-to-workspace 1; }
+    Mod+Shift+Alt+1 { move-window-to-workspace 1 focus=false; }
+    Mod+2 { focus-workspace 2; }
+    Mod+Shift+2 { move-window-to-workspace 2; }
+    Mod+Shift+Alt+2 { move-window-to-workspace 2 focus=false; }
+    Mod+3 { focus-workspace 3; }
+    Mod+Shift+3 { move-window-to-workspace 3; }
+    Mod+Shift+Alt+3 { move-window-to-workspace 3 focus=false; }
+    Mod+4 { focus-workspace 4; }
+    Mod+Shift+4 { move-window-to-workspace 4; }
+    Mod+Shift+Alt+4 { move-window-to-workspace 4 focus=false; }
+    Mod+5 { focus-workspace 5; }
+    Mod+Shift+5 { move-window-to-workspace 5; }
+    Mod+Shift+Alt+5 { move-window-to-workspace 5 focus=false; }
+    Mod+6 { focus-workspace 6; }
+    Mod+Shift+6 { move-window-to-workspace 6; }
+    Mod+Shift+Alt+6 { move-window-to-workspace 6 focus=false; }
+    Mod+7 { focus-workspace 7; }
+    Mod+Shift+7 { move-window-to-workspace 7; }
+    Mod+Shift+Alt+7 { move-window-to-workspace 7 focus=false; }
+    Mod+8 { focus-workspace 8; }
+    Mod+Shift+8 { move-window-to-workspace 8; }
+    Mod+Shift+Alt+8 { move-window-to-workspace 8 focus=false; }
+    Mod+9 { focus-workspace 9; }
+    Mod+Shift+9 { move-window-to-workspace 9; }
+    Mod+Shift+Alt+9 { move-window-to-workspace 9 focus=false; }
+    Mod+Left { focus-column-left; }
+    Mod+Shift+Left { swap-window-left; }
+    Mod+Shift+Alt+Left { move-workspace-to-monitor-left; }
+    Mod+Alt+Left { consume-or-expel-window-left; }
+    Mod+Right { focus-column-right; }
+    Mod+Shift+Right { swap-window-right; }
+    Mod+Shift+Alt+Right { move-workspace-to-monitor-right; }
+    Mod+Alt+Right { consume-or-expel-window-right; }
+    Mod+Up { focus-window-up; }
+    Mod+Shift+Up { move-window-up; }
+    Mod+Shift+Alt+Up { move-workspace-to-monitor-up; }
+    Mod+Down { focus-window-down; }
+    Mod+Shift+Down { move-window-down; }
+    Mod+Shift+Alt+Down { move-workspace-to-monitor-down; }
+    Ctrl+Alt+Tab { focus-monitor-next; }
+    Ctrl+Alt+Shift+Tab { focus-monitor-previous; }
+    Mod+WheelScrollDown cooldown-ms=150 { focus-workspace-down; }
+    Mod+WheelScrollUp cooldown-ms=150 { focus-workspace-up; }
+    Mod+Minus { set-column-width "+10%"; }
+    Mod+Equal { set-column-width "-10%"; }
+    Mod+Alt+Minus { set-column-width "+5%"; }
+    Mod+Alt+Equal { set-column-width "-5%"; }
+    Mod+Ctrl+Minus { set-column-width "+20%"; }
+    Mod+Ctrl+Equal { set-column-width "-20%"; }
+    Mod+Shift+Minus { set-window-height "-10%"; }
+    Mod+Shift+Equal { set-window-height "+10%"; }
+    Mod+G { toggle-column-tabbed-display; }
+    Mod+Alt+G { expel-window-from-column; }
+    Mod+Alt+Tab { focus-window-down-or-top; }
+    Mod+Alt+Shift+Tab { focus-window-up-or-bottom; }
+    Mod+Alt+1 { focus-window-in-column 1; }
+    Mod+Alt+2 { focus-window-in-column 2; }
+    Mod+Alt+3 { focus-window-in-column 3; }
+    Mod+Alt+4 { focus-window-in-column 4; }
+    Mod+Alt+5 { focus-window-in-column 5; }
+    Mod+Ctrl+Left { focus-window-up; }
+    Mod+Ctrl+Right { focus-window-down; }
+    Mod+Ctrl+V { spawn "dms" "ipc" "call" "clipboard" "toggle"; }
+    Mod+Ctrl+A { spawn "dms" "ipc" "call" "settings" "toggleWith" "audio"; }
+    Mod+Ctrl+B { spawn "dms" "ipc" "call" "control-center" "toggle"; }
+    Mod+Ctrl+W { spawn "dms" "ipc" "call" "settings" "toggleWith" "network"; }
+    Mod+Ctrl+D { spawn "dms" "ipc" "call" "settings" "toggleWith" "displays"; }
+    Mod+Ctrl+P { spawn "dms" "ipc" "call" "settings" "toggleWith" "power_security"; }
+    Mod+Ctrl+T { spawn "runneos-terminal" "-e" "btop"; }
+    Mod+Ctrl+H { spawn "dms" "ipc" "call" "settings" "toggleWith" "about"; }
+    Mod+Ctrl+Q { spawn "dms" "ipc" "call" "spotlight" "openQuery" "="; }
+    Print { spawn "dms" "ipc" "call" "screenshotPlus" "capture"; }
+    Alt+Print { spawn "dms" "ipc" "call" "screenRecorder" "toggleRecording"; }
+    Mod+Print { spawn "dms" "ipc" "call" "color-picker" "toggle"; }
+    Mod+Comma { spawn "dms" "ipc" "call" "notifications" "dismiss"; }
+    Mod+Shift+Comma { spawn "dms" "ipc" "call" "notifications" "dismissAllPopups"; }
+    Mod+Ctrl+Comma { spawn "dms" "ipc" "call" "notifications" "toggleDoNotDisturb"; }
+    Mod+Shift+Alt+Comma { spawn "dms" "ipc" "call" "notifications" "toggle"; }
+    Mod+Ctrl+Shift+Space { spawn "dms" "ipc" "call" "settings" "toggleWith" "theme"; }
+    Mod+Ctrl+Space { spawn "dms" "ipc" "call" "dash" "toggle" "wallpaper"; }
+    Mod+Ctrl+N { spawn "dms" "ipc" "call" "night" "toggle"; }
+    Mod+Shift+Space { spawn "dms" "ipc" "call" "bar" "toggle"; }
+    XF86AudioRaiseVolume { spawn "dms" "ipc" "call" "audio" "increment" "5"; }
+    XF86AudioLowerVolume { spawn "dms" "ipc" "call" "audio" "decrement" "5"; }
+    Alt+XF86AudioRaiseVolume { spawn "dms" "ipc" "call" "audio" "increment" "1"; }
+    Alt+XF86AudioLowerVolume { spawn "dms" "ipc" "call" "audio" "decrement" "1"; }
+    XF86AudioMute { spawn "dms" "ipc" "call" "audio" "mute"; }
+    XF86AudioMicMute { spawn "dms" "ipc" "call" "audio" "micmute"; }
+    Shift+XF86AudioMute { spawn "dms" "ipc" "call" "audio" "cycleoutput"; }
+    XF86AudioPlay { spawn "dms" "ipc" "call" "mpris" "playPause"; }
+    XF86AudioNext { spawn "dms" "ipc" "call" "mpris" "next"; }
+    XF86AudioPrev { spawn "dms" "ipc" "call" "mpris" "previous"; }
+    Alt+XF86AudioPlay { spawn "dms" "ipc" "call" "mpris" "next"; }
+    Alt+Shift+XF86AudioPlay { spawn "dms" "ipc" "call" "mpris" "previous"; }
+    XF86MonBrightnessUp { spawn "dms" "ipc" "call" "brightness" "increment" "5"; }
+    XF86MonBrightnessDown { spawn "dms" "ipc" "call" "brightness" "decrement" "5"; }
+    Alt+XF86MonBrightnessUp { spawn "dms" "ipc" "call" "brightness" "increment" "1"; }
+    Alt+XF86MonBrightnessDown { spawn "dms" "ipc" "call" "brightness" "decrement" "1"; }
+    Shift+XF86MonBrightnessUp { spawn "dms" "ipc" "call" "brightness" "set" "100"; }
+    Shift+XF86MonBrightnessDown { spawn "dms" "ipc" "call" "brightness" "set" "1"; }
+}

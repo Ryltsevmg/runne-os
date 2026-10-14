@@ -1,0 +1,894 @@
+#!/usr/bin/python3
+"""runneos-agents — командная строка локального «пульта агентов» RunneOS.
+
+Контракт: packages/runneos-agents/INTERFACE.md, раздел 7.
+Коды возврата: 0 — успех, 1 — ошибка выполнения, 2 — неверное использование.
+Вывод для людей по-русски; с `--json` — машинночитаемо (один объект на строку).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+# Пакет лежит рядом с этим скриптом в дереве исходников либо в /usr/share/runneos/agents.
+_HERE = Path(__file__).resolve().parent
+for candidate in (_HERE, _HERE / "share", Path("/usr/share/runneos/agents")):
+    if (candidate / "runneos_agents" / "__init__.py").exists():
+        sys.path.insert(0, str(candidate))
+        break
+
+from runneos_agents import (  # noqa: E402
+    Agent,
+    delegate,
+    Orchestrator,
+    Store,
+    __version__,
+    default_root,
+    ensure_workspace,
+    load_policy,
+    load_sandbox,
+    new_agent_id,
+    now_iso,
+    read_section,
+    write_section,
+)
+from runneos_agents.routing import default_registry, resolve_workspace_path  # noqa: E402
+
+EXIT_OK = 0
+EXIT_ERROR = 1
+EXIT_USAGE = 2
+
+
+def build_parser() -> argparse.ArgumentParser:
+    # --json принимается и до, и после подкоманды: так удобнее и скриптам, и человеку.
+    # default=SUPPRESS: подкоманда без своего --json не должна затирать значение родителя.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--json", action="store_true", default=argparse.SUPPRESS, help="машинночитаемый вывод"
+    )
+
+    parser = argparse.ArgumentParser(
+        prog="runneos-agents",
+        parents=[common],
+        description="Постоянные ИИ-агенты RunneOS: свои воркспейсы, свой журнал, свои подписки.",
+    )
+    parser.add_argument("--version", action="version", version=f"runneos-agents {__version__}")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("init", parents=[common], help="создать корень данных и базу")
+
+    provider = sub.add_parser("provider", parents=[common], help="провайдеры и их доступность")
+    provider_sub = provider.add_subparsers(dest="provider_command", required=True)
+    provider_sub.add_parser("list", parents=[common], help="список провайдеров")
+    provider_sub.add_parser("auth-status", parents=[common], help="авторизация провайдеров и как подключить")
+
+    agent = sub.add_parser("agent", parents=[common], help="постоянные агенты")
+    agent_sub = agent.add_subparsers(dest="agent_command", required=True)
+
+    add = agent_sub.add_parser("add", parents=[common], help="создать или обновить агента")
+    add.add_argument("name", help="имя агента")
+    add.add_argument("--id", dest="agent_id", default="", help="слаг (по умолчанию из имени)")
+    add.add_argument("--role", default="", help="роль агента")
+    add.add_argument("--provider", default="codex", help="провайдер (по умолчанию codex)")
+    add.add_argument("--instructions", default="", help="дополнительные инструкции")
+    add.add_argument("--no-workspace", action="store_true", help="не создавать воркспейс")
+
+    agent_sub.add_parser("list", parents=[common], help="список агентов")
+    show = agent_sub.add_parser("show", parents=[common], help="подробности агента")
+    show.add_argument("agent_id")
+    remove = agent_sub.add_parser("remove", parents=[common], help="удалить агента и его данные")
+    remove.add_argument("agent_id")
+
+    policy = agent_sub.add_parser("policy", parents=[common], help="политика агента: просмотр и правка")
+    policy.add_argument("agent_id")
+    policy.add_argument("--enforce", choices=("on", "off"), default=None, help="включить/выключить принуждение")
+    policy.add_argument("--allow", action="append", default=[], metavar="CMD", help="добавить разрешающее правило (повторяемо)")
+    policy.add_argument("--deny", action="append", default=[], metavar="CMD", help="добавить запрещающее правило (повторяемо)")
+    policy.add_argument("--args", default="", help="подкоманда для правил этой команды (--allow/--deny)")
+    policy.add_argument("--note", default="", help="пояснение к добавляемым правилам")
+    policy.add_argument("--remove", action="append", default=[], metavar="NAME", help="убрать правило по имени (повторяемо)")
+    policy.add_argument("--reset", action="store_true", help="удалить секцию политики (вернуть набор по умолчанию)")
+
+    ask = sub.add_parser("ask", parents=[common], help="поставить задачу агенту")
+    ask.add_argument("agent_id")
+    ask.add_argument("prompt", help="текст задачи")
+    ask.add_argument("--new", action="store_true", help="начать новую сессию")
+    ask.add_argument("--session", default="", help="конкретная сессия")
+    ask.add_argument("--model", default=None, help="модель провайдера")
+    ask.add_argument("--timeout", type=float, default=None, help="таймаут в секундах")
+
+    task = sub.add_parser("task", parents=[common], help="очередь задач агентов (v1.10, сервис агентов)")
+    task_sub = task.add_subparsers(dest="task_command", required=True)
+    task_add = task_sub.add_parser("add", parents=[common], help="поставить задачу в очередь")
+    task_add.add_argument("agent_id")
+    task_add.add_argument("prompt")
+    task_list = task_sub.add_parser("list", parents=[common], help="задачи (свежие сверху)")
+    task_list.add_argument("--agent", default=None, help="только задачи агента")
+    task_list.add_argument("--limit", type=int, default=20)
+    task_show = task_sub.add_parser("show", parents=[common], help="подробности задачи")
+    task_show.add_argument("task_id")
+    task_cancel = task_sub.add_parser("cancel", parents=[common], help="отменить задачу")
+    task_cancel.add_argument("task_id")
+
+    send = sub.add_parser("send", parents=[common], help="передать задачу другому агенту (v1.8)")
+    send.add_argument("from_agent", help="агент-отправитель")
+    send.add_argument("to_agent", help="агент-получатель")
+    send.add_argument("prompt", help="текст задачи")
+    send.add_argument("--run", action="store_true", help="выполнить ход получателя сразу (через его ворота)")
+    send.add_argument("--new", action="store_true", help="новая сессия у получателя")
+    send.add_argument("--model", default=None, help="модель провайдера получателя")
+    send.add_argument("--timeout", type=float, default=None, help="таймаут в секундах")
+
+    sessions = sub.add_parser("sessions", parents=[common], help="сессии агента")
+    sessions.add_argument("agent_id")
+    sessions.add_argument("--limit", type=int, default=20)
+
+    log = sub.add_parser("log", parents=[common], help="журнал событий сессии")
+    log.add_argument("session_id")
+    log.add_argument("--limit", type=int, default=50)
+    log.add_argument("--after", type=int, default=0, help="только события после указанного seq")
+
+    sub.add_parser("doctor", parents=[common], help="проверки состояния без изменений")
+
+    serve = sub.add_parser("serve", parents=[common], help="локальный API: JSON поверх unix-сокета (v1.9, opt-in)")
+    serve.add_argument("--socket", default="", help="путь сокета (по умолчанию $XDG_RUNTIME_DIR/runneos/agents.sock)")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return _dispatch(args)
+    except KeyboardInterrupt:
+        print("прервано пользователем", file=sys.stderr)
+        return EXIT_ERROR
+    except BrokenPipeError:  # вывод в закрытый канал — не ошибка пакета
+        return EXIT_OK
+    except Exception as error:  # последняя линия: без трассировки в лицо пользователю
+        print(f"ошибка: {type(error).__name__}: {error}", file=sys.stderr)
+        return EXIT_ERROR
+
+
+
+def _open_store() -> "Store | None":
+    """Открыть хранилище для чтения, не создавая данные.
+
+    None означает «данных ещё нет»: это не ошибка, а честное состояние до `init`.
+    """
+    if not (default_root() / "agents.db").exists():
+        return None
+    return Store()
+
+def _dispatch(args: argparse.Namespace) -> int:
+    if args.command == "init":
+        return _cmd_init(args)
+    if args.command == "provider":
+        return _cmd_provider(args)
+    if args.command == "agent":
+        return _cmd_agent(args)
+    if args.command == "ask":
+        return _cmd_ask(args)
+    if args.command == "send":
+        return _cmd_send(args)
+    if args.command == "task":
+        return _cmd_task(args)
+    if args.command == "sessions":
+        return _cmd_sessions(args)
+    if args.command == "log":
+        return _cmd_log(args)
+    if args.command == "doctor":
+        return _cmd_doctor(args)
+    if args.command == "serve":
+        return _cmd_serve(args)
+    print("неизвестная команда", file=sys.stderr)
+    return EXIT_USAGE
+
+
+# --- команды ---------------------------------------------------------------
+
+
+def _cmd_init(args: argparse.Namespace) -> int:
+    root = default_root()
+    with Store() as store:
+        store.root.mkdir(parents=True, exist_ok=True)
+        (store.root / "workspaces").mkdir(exist_ok=True)
+        (store.root / "runs").mkdir(exist_ok=True)
+    payload = {"root": str(root), "db": str(root / "agents.db"), "created_at": now_iso()}
+    _emit(args, payload, f"Корень данных готов: {payload['root']}")
+    return EXIT_OK
+
+
+def _cmd_provider(args: argparse.Namespace) -> int:
+    """Только чтение: реестр адаптеров не требует хранилища и не создаёт корень данных."""
+    if args.provider_command == "auth-status":
+        return _cmd_provider_auth_status(args)
+    available = default_registry().availability()
+    if _want_json(args):
+        for item in available:
+            print(json.dumps(_availability_dict(item), ensure_ascii=False))
+    else:
+        for item in available:
+            mark = "доступен" if item.available else "недоступен"
+            version = f" · {item.version}" if item.version else ""
+            reason = "" if item.available else f" · {item.reason}"
+            print(f"{item.provider:<10} {mark}{version}{reason}")
+    return EXIT_OK
+
+
+def _cmd_provider_auth_status(args: argparse.Namespace) -> int:
+    """Авторизация провайдеров штатными командами их CLI; read-only, данных не создаёт."""
+    registry = default_registry()
+    present = {item.provider: bool(item.available) for item in registry.availability()}
+    rows = []
+    for item in registry.authorization():
+        rows.append(
+            {
+                "provider": item.provider,
+                "binary_present": present.get(item.provider, False),
+                "authorized": item.authorized,
+                "detail": item.detail,
+                "how": item.how,
+            }
+        )
+    if _want_json(args):
+        for row in rows:
+            print(json.dumps(row, ensure_ascii=False))
+    elif not rows:
+        print("Провайдеров, известных ядру, нет.")
+    else:
+        for row in rows:
+            if not row["binary_present"]:
+                mark = "не найден"
+            elif row["authorized"] is True:
+                mark = "авторизован"
+            elif row["authorized"] is None:
+                mark = "неизвестно"
+            else:
+                mark = "не авторизован"
+            detail = f" · {row['detail']}" if row["detail"] else ""
+            how = f" · подключить: {row['how']}" if row["how"] and not row["authorized"] else ""
+            print(f"{row['provider']:<10} {mark}{detail}{how}")
+    return EXIT_OK
+
+
+def _cmd_agent(args: argparse.Namespace) -> int:
+    if args.agent_command == "list":
+        # Чтение не создаёт данные: нет базы — значит агентов ещё нет, и это не ошибка.
+        if not (default_root() / "agents.db").exists():
+            if _want_json(args):
+                return EXIT_OK
+            print("Агентов пока нет. Создать: runneos-agents init, затем agent add <имя>")
+            return EXIT_OK
+        with Store() as store:
+            agents = store.list_agents()
+            rows = [_agent_dict(store, agent) for agent in agents]
+        if _want_json(args):
+            for row in rows:
+                print(json.dumps(row, ensure_ascii=False))
+        elif not rows:
+            print("Агентов пока нет. Добавить: runneos-agents agent add <имя>")
+        else:
+            for row in rows:
+                print(
+                    f"{row['id']:<16} {row['name']:<24} {row['provider']:<9} "
+                    f"{row['state']:<12} {row['workspace']}"
+                )
+        return EXIT_OK
+
+    if args.agent_command == "add":
+        agent_id = args.agent_id or new_agent_id(args.name)
+        try:
+            with Store() as store:
+                agent = store.upsert_agent(
+                    Agent(
+                        id=agent_id,
+                        name=args.name,
+                        role=args.role,
+                        provider=args.provider,
+                        instructions=args.instructions,
+                        created_at=now_iso(),
+                    )
+                )
+                workspace = None
+                if not args.no_workspace:
+                    workspace = resolve_workspace_path(agent, store.root)
+                    ensure_workspace(agent.replace(workspace=workspace), store.root)
+                    agent = store.upsert_agent(agent.replace(workspace=workspace))
+                row = _agent_dict(store, agent)
+        except ValueError as error:
+            print(f"ошибка: {error}", file=sys.stderr)
+            return EXIT_ERROR
+        _emit(
+            args,
+            row,
+            f"Агент «{row['name']}» ({row['id']}) готов. Воркспейс: {row['workspace']}",
+        )
+        return EXIT_OK
+
+    if args.agent_command == "show":
+        store = _open_store()
+        if store is None:
+            print(f"ошибка: данных ещё нет, выполните runneos-agents init", file=sys.stderr)
+            return EXIT_ERROR
+        with store:
+            agent = store.get_agent(args.agent_id)
+            if agent is None:
+                print(f"ошибка: неизвестный агент: {args.agent_id}", file=sys.stderr)
+                return EXIT_ERROR
+            payload = _agent_dict(store, agent)
+            sessions = []
+            for item in store.list_sessions(agent.id, limit=10):
+                row = _session_dict(item)
+                row["messages"] = len(store.list_messages(item.id, limit=1000))
+                sessions.append(row)
+            payload["sessions"] = sessions
+        if _want_json(args):
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"{payload['name']} ({payload['id']})")
+            print(f"  роль:       {payload['role'] or '—'}")
+            print(f"  провайдер:  {payload['provider']}")
+            print(f"  состояние:  {payload['state']}")
+            print(f"  воркспейс:  {payload['workspace']}")
+            print(f"  создан:     {payload['created_at']}")
+            print(f"  сессий:     {len(payload['sessions'])}")
+            for session in payload["sessions"]:
+                print(
+                    f"    {session['id'][:12]}… {session['state']:<6} "
+                    f"{session['updated_at']} сообщений: {session['messages']}"
+                )
+        return EXIT_OK
+
+    if args.agent_command == "remove":
+        store = _open_store()
+        if store is None:
+            print("ошибка: данных ещё нет, выполните runneos-agents init", file=sys.stderr)
+            return EXIT_ERROR
+        with store:
+            agent = store.get_agent(args.agent_id)
+            if agent is None:
+                print(f"ошибка: неизвестный агент: {args.agent_id}", file=sys.stderr)
+                return EXIT_ERROR
+            workspace = str(agent.workspace or "")
+            removed = store.remove_agent(agent.id)
+        payload = {"removed": removed, "agent_id": args.agent_id, "workspace_kept": workspace}
+        _emit(
+            args,
+            payload,
+            f"Агент {args.agent_id} удалён из базы. Файлы воркспейса оставлены: {workspace or '—'}",
+        )
+        return EXIT_OK
+
+    if args.agent_command == "policy":
+        return _cmd_agent_policy(args)
+
+    return EXIT_USAGE
+
+
+def _policy_with_rule(section: dict | None, command: str, sub: str, allow: bool, note: str) -> dict:
+    """Секция с одним добавленным правилом (имя даётся по порядку)."""
+    result = dict(section or {})
+    rules = list(result.get("rules") or [])
+    rule: dict = {"command": str(command).strip(), "allow": bool(allow), "name": f"rule-{len(rules) + 1}"}
+    if str(sub or "").strip():
+        rule["args"] = str(sub).strip()
+    if str(note or "").strip():
+        rule["note"] = str(note).strip()
+    result["rules"] = rules + [rule]
+    return result
+
+
+def _policy_without_rule(section: dict | None, name: str) -> tuple[dict, bool]:
+    """Секция без правила с этим именем; флаг — нашлось ли хоть одно."""
+    result = dict(section or {})
+    rules = list(result.get("rules") or [])
+    kept = [rule for rule in rules if str(rule.get("name")) != str(name)]
+    result["rules"] = kept
+    return result, len(kept) != len(rules)
+
+
+def _cmd_agent_policy(args: argparse.Namespace) -> int:
+    """Просмотр и правка политики агента (INTERFACE v1.7). Правка идёт через
+    write_section: сломанную секцию сохранить нельзя."""
+    store = _open_store()
+    if store is None:
+        print("ошибка: данных ещё нет, выполните runneos-agents init", file=sys.stderr)
+        return EXIT_ERROR
+    with store:
+        agent = store.get_agent(args.agent_id)
+        if agent is None:
+            print(f"ошибка: неизвестный агент: {args.agent_id}", file=sys.stderr)
+            return EXIT_ERROR
+        workspace_path = agent.workspace or resolve_workspace_path(agent, store.root)
+        section = read_section(workspace_path)
+        mutating = bool(args.enforce or args.allow or args.deny or args.remove or args.reset)
+        if mutating:
+            if args.reset:
+                section = None
+            if section is None and not args.reset:
+                section = {"enforce": False, "rules": []}
+            if args.enforce and section is not None:
+                section = dict(section)
+                section["enforce"] = args.enforce == "on"
+            for command in args.allow:
+                section = _policy_with_rule(section, command, args.args, True, args.note)
+            for command in args.deny:
+                section = _policy_with_rule(section, command, args.args, False, args.note)
+            missing = []
+            for name in args.remove:
+                section, removed = _policy_without_rule(section, name)
+                if not removed:
+                    missing.append(name)
+            try:
+                write_section(workspace_path, section, agent.provider)
+            except ValueError as error:
+                print(f"ошибка: секцию не сохранить: {error}", file=sys.stderr)
+                return EXIT_ERROR
+            for name in missing:
+                print(f"правило {name} не найдено (остальные изменения сохранены)", file=sys.stderr)
+
+        loaded = load_policy(workspace_path, agent.provider)
+        decision = loaded.policy.check_provider(agent.provider)
+        current = read_section(workspace_path)
+        rules = list((current or {}).get("rules") or [])
+        payload = {
+            "agent_id": agent.id,
+            "provider": agent.provider,
+            "workspace": str(workspace_path),
+            "source": loaded.source,
+            "enforce": loaded.enforce,
+            "provider_run": {
+                "allowed": decision.allowed,
+                "rule": decision.rule,
+                "reason": decision.reason,
+            },
+            "rules": [
+                {
+                    "name": str(rule.get("name") or f"rule-{index}"),
+                    "command": str(rule.get("command") or ""),
+                    "args": str(rule.get("args") or ""),
+                    "allow": bool(rule.get("allow")),
+                    "note": str(rule.get("note") or ""),
+                }
+                for index, rule in enumerate(rules, start=1)
+            ],
+            "summary": loaded.summary(),
+        }
+    if _want_json(args):
+        print(json.dumps(payload, ensure_ascii=False))
+    else:
+        print(f"{payload['agent_id']} ({payload['provider']}) — {payload['summary']}")
+        print(
+            f"  запуск провайдера: {'разрешено' if payload['provider_run']['allowed'] else 'запрещено'}"
+            f" ({payload['provider_run']['rule']})"
+        )
+        for rule in payload["rules"]:
+            mark = "allow" if rule["allow"] else "deny "
+            tail = f" {rule['args']}" if rule["args"] else ""
+            note = f" — {rule['note']}" if rule["note"] else ""
+            print(f"  [{mark}] {rule['command']}{tail}  ({rule['name']}){note}")
+        if not payload["rules"]:
+            print("  (явных правил нет: работают наборы по умолчанию)")
+    return EXIT_OK
+
+
+def _cmd_ask(args: argparse.Namespace) -> int:
+    with Store() as store:
+        orchestrator = Orchestrator(store)
+        result = orchestrator.ask(
+            args.agent_id,
+            args.prompt,
+            session_id=args.session or None,
+            model=args.model,
+            timeout=args.timeout,
+            new_session=args.new,
+        )
+        events = store.list_events(result.session_id, limit=500) if result.session_id else []
+    payload = {
+        "ok": result.ok,
+        "agent_id": args.agent_id,
+        "session_id": result.session_id,
+        "provider_session_id": result.provider_session_id,
+        "text": result.text,
+        "error": result.error,
+        "usage": result.usage,
+        "exit_code": result.exit_code,
+        "events": len(events),
+    }
+    if _want_json(args):
+        print(json.dumps(payload, ensure_ascii=False))
+    else:
+        if result.text:
+            print(result.text)
+        if result.error:
+            print(f"ошибка: {result.error}", file=sys.stderr)
+        if result.usage:
+            print(
+                "расход: " + ", ".join(f"{key}={value}" for key, value in result.usage.items()),
+                file=sys.stderr,
+            )
+    return EXIT_OK if result.ok else EXIT_ERROR
+
+
+def _task_dict(task) -> dict:
+    return {
+        "id": task.id,
+        "agent_id": task.agent_id,
+        "prompt": task.prompt,
+        "state": task.state,
+        "position": task.position,
+        "created_at": task.created_at,
+        "started_at": task.started_at,
+        "finished_at": task.finished_at,
+        "session_id": task.session_id,
+        "error": task.error,
+        "result": task.result,
+    }
+
+
+def _service_active() -> bool:
+    """Запущена ли служба очереди: без неё задача просто ждёт в базе."""
+    probe = subprocess.run(
+        ["systemctl", "--user", "is-active", "runneos-agents-service.service"],
+        capture_output=True, text=True, timeout=15, check=False)
+    return probe.stdout.strip() == "active"
+
+
+def _cmd_task(args: argparse.Namespace) -> int:
+    command = args.task_command
+    if command == "add":
+        with Store() as store:
+            try:
+                task = store.create_task(args.agent_id, args.prompt)
+            except ValueError as error:
+                print(f"ошибка: {error}", file=sys.stderr)
+                return EXIT_ERROR
+        payload = _task_dict(task)
+        payload["service_active"] = _service_active()
+        if _want_json(args):
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            note = "" if payload["service_active"] else (
+                " (служба очереди не активна: задача ждёт — "
+                "systemctl --user enable --now runneos-agents-service.service)")
+            print(f"Задача {task.id} в очереди агента {task.agent_id}{note}")
+        return EXIT_OK
+
+    if command == "list":
+        store = _open_store()
+        if store is None:
+            print("ошибка: данных ещё нет, выполните runneos-agents init", file=sys.stderr)
+            return EXIT_ERROR
+        with store:
+            rows = [_task_dict(task) for task in store.list_tasks(args.agent, args.limit)]
+        if _want_json(args):
+            for row in rows:
+                print(json.dumps(row, ensure_ascii=False))
+        elif not rows:
+            print("Задач нет.")
+        else:
+            for row in rows:
+                print(f"{row['id']:<13} [{row['state']:<8}] {row['agent_id']:<16} {row['prompt'][:70]}")
+        return EXIT_OK
+
+    if command == "show":
+        store = _open_store()
+        if store is None:
+            print("ошибка: данных ещё нет, выполните runneos-agents init", file=sys.stderr)
+            return EXIT_ERROR
+        with store:
+            task = store.get_task(args.task_id)
+            if task is None:
+                print(f"ошибка: неизвестная задача: {args.task_id}", file=sys.stderr)
+                return EXIT_ERROR
+            payload = _task_dict(task)
+        if _want_json(args):
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"{payload['id']} [{payload['state']}] агент: {payload['agent_id']}")
+            print(f"  поставлена:  {payload['created_at']}")
+            if payload["started_at"]:
+                print(f"  в работе:    {payload['started_at']}")
+            if payload["finished_at"]:
+                print(f"  завершена:   {payload['finished_at']}")
+            if payload["session_id"]:
+                print(f"  сессия:      {payload['session_id']}")
+            print(f"  задача:      {payload['prompt']}")
+            if payload["result"]:
+                print(f"  результат:   {payload['result'][:400]}")
+            if payload["error"]:
+                print(f"  ошибка:      {payload['error']}")
+        return EXIT_OK
+
+    if command == "cancel":
+        store = _open_store()
+        if store is None:
+            print("ошибка: данных ещё нет, выполните runneos-agents init", file=sys.stderr)
+            return EXIT_ERROR
+        with store:
+            try:
+                task = store.set_task_state(args.task_id, "canceled", finished_at=now_iso())
+            except ValueError as error:
+                print(f"ошибка: {error}", file=sys.stderr)
+                return EXIT_ERROR
+        payload = _task_dict(task)  # type: ignore[arg-type]
+        if _want_json(args):
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            running = payload["state"] == "canceled" and payload["started_at"] is not None
+            tail = " (ход остановит служба на очередном событии)" if running else ""
+            print(f"Задача {payload['id']} отменена.{tail}")
+        return EXIT_OK
+
+    return EXIT_USAGE
+
+
+def _cmd_send(args: argparse.Namespace) -> int:
+    """Передача задачи между агентами (v1.8). Без --run — только запись в журнал."""
+    with Store() as store:
+        result = delegate(
+            store,
+            Orchestrator(store),
+            from_agent=args.from_agent,
+            to_agent=args.to_agent,
+            prompt=args.prompt,
+            run=args.run,
+            new_session=args.new,
+            model=args.model,
+            timeout=args.timeout,
+        )
+    payload = {
+        "ok": result.ok,
+        "handoff_id": result.handoff_id,
+        "from": result.from_agent,
+        "to": result.to_agent,
+        "target_session_id": result.target_session_id,
+        "error": result.error,
+    }
+    if result.turn is not None:
+        payload["turn"] = {
+            "ok": result.turn.ok,
+            "text": result.turn.text,
+            "provider_session_id": result.turn.provider_session_id,
+            "exit_code": result.turn.exit_code,
+        }
+    if _want_json(args):
+        print(json.dumps(payload, ensure_ascii=False))
+    else:
+        if not result.ok:
+            print(f"ошибка: {result.error}", file=sys.stderr)
+        else:
+            where = f", сессия {result.target_session_id[:12]}…" if result.target_session_id else ""
+            print(f"Передача {result.handoff_id}: {result.from_agent} → {result.to_agent}{where}")
+            if result.turn is not None:
+                if result.turn.text:
+                    print(result.turn.text)
+                if result.turn.error:
+                    print(f"ошибка хода: {result.turn.error}", file=sys.stderr)
+    return EXIT_OK if result.ok else EXIT_ERROR
+
+
+def _cmd_sessions(args: argparse.Namespace) -> int:
+    store = _open_store()
+    if store is None:
+        print("ошибка: данных ещё нет, выполните runneos-agents init", file=sys.stderr)
+        return EXIT_ERROR
+    with store:
+        if store.get_agent(args.agent_id) is None:
+            print(f"ошибка: неизвестный агент: {args.agent_id}", file=sys.stderr)
+            return EXIT_ERROR
+        rows = []
+        for session in store.list_sessions(args.agent_id, limit=args.limit):
+            row = _session_dict(session)
+            row["messages"] = len(store.list_messages(session.id, limit=1000))
+            rows.append(row)
+    if _want_json(args):
+        for row in rows:
+            print(json.dumps(row, ensure_ascii=False))
+    elif not rows:
+        print("Сессий пока нет.")
+    else:
+        for row in rows:
+            provider = row["provider_session_id"] or "—"
+            print(
+                f"{row['id']}  {row['state']:<6} {row['updated_at']}  "
+                f"сообщений: {row['messages']:<3} провайдер: {provider}"
+            )
+    return EXIT_OK
+
+
+def _cmd_log(args: argparse.Namespace) -> int:
+    store = _open_store()
+    if store is None:
+        print("ошибка: данных ещё нет, выполните runneos-agents init", file=sys.stderr)
+        return EXIT_ERROR
+    with store:
+        if store.get_session(args.session_id) is None:
+            print(f"ошибка: неизвестная сессия: {args.session_id}", file=sys.stderr)
+            return EXIT_ERROR
+        events = (
+            store.events_after(args.session_id, args.after, limit=args.limit)
+            if args.after
+            else store.list_events(args.session_id, limit=args.limit)
+        )
+        payload = [_event_dict(event) for event in events]
+    if _want_json(args):
+        for row in payload:
+            print(json.dumps(row, ensure_ascii=False))
+    elif not payload:
+        print("Событий нет.")
+    else:
+        for row in payload:
+            text = row["payload"].get("text") or ""
+            print(f"{row['seq']:>4}  {row['created_at']}  {row['kind']:<16} {text[:120]}")
+    return EXIT_OK
+
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    """Read-only проверки: ничего не создаёт и не меняет, кроме чтения."""
+    checks: list[dict] = []
+    root = default_root()
+    checks.append(
+        {
+            "name": "корень данных",
+            "ok": root.exists(),
+            "detail": str(root) if root.exists() else f"нет каталога {root} (нужен runneos-agents init)",
+        }
+    )
+    db_path = root / "agents.db"
+    checks.append(
+        {
+            "name": "база",
+            "ok": db_path.exists(),
+            "detail": str(db_path) if db_path.exists() else "нет файла базы",
+        }
+    )
+
+    stats: dict = {}
+    if db_path.exists():
+        with Store() as store:
+            stats = store.stats()
+            agents = store.list_agents()
+            checks.append(
+                {"name": "схема", "ok": stats["schema_version"] >= 1, "detail": f"версия {stats['schema_version']}"}
+            )
+            missing = [
+                agent.id
+                for agent in agents
+                if agent.workspace and not Path(agent.workspace).is_dir()
+            ]
+            checks.append(
+                {
+                    "name": "воркспейсы агентов",
+                    "ok": not missing,
+                    "detail": f"агентов: {len(agents)}, без каталога: {missing or 'нет'}",
+                }
+            )
+            runtimes = Orchestrator(store).providers()
+            for item in runtimes:
+                checks.append(
+                    {
+                        "name": f"провайдер {item.provider}",
+                        "ok": item.available,
+                        "detail": (item.version or "версия неизвестна") if item.available else item.reason,
+                    }
+                )
+            # Состояние ворот политик: сломанная секция — реальная проблема (ход запрещён),
+            # поэтому она делает соответствующую проверку неуспешной.
+            for agent in agents:
+                workspace_path = agent.workspace or resolve_workspace_path(agent, store.root)
+                loaded = load_policy(workspace_path, agent.provider)
+                checks.append(
+                    {"name": f"политика {agent.id}", "ok": loaded.error is None, "detail": loaded.summary()}
+                )
+                # Состояние песочницы того же рода: сломанная секция запрещает ход.
+                sandbox = load_sandbox(workspace_path)
+                checks.append(
+                    {
+                        "name": f"песочница {agent.id}",
+                        "ok": sandbox.error is None,
+                        "detail": sandbox.summary(),
+                    }
+                )
+
+    payload = {"root": str(root), "checks": checks, "stats": stats, "version": __version__}
+    if _want_json(args):
+        print(json.dumps(payload, ensure_ascii=False))
+    else:
+        print(f"runneos-agents {__version__} · корень: {root}")
+        for check in checks:
+            mark = "ок  " if check["ok"] else "нет "
+            print(f"  [{mark}] {check['name']}: {check['detail']}")
+        if stats:
+            counts = stats["counts"]
+            print(
+                f"  данные: агентов {counts['agents']}, сессий {counts['sessions']}, "
+                f"сообщений {counts['messages']}, событий {counts['events']}"
+            )
+    critical = [check for check in checks if check["name"] in ("корень данных", "база")]
+    return EXIT_OK if all(check["ok"] for check in critical) else EXIT_ERROR
+
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    """Локальный API (INTERFACE v1.9): opt-in, останавливается Ctrl+C."""
+    from runneos_agents import default_socket_path, serve as run_serve
+
+    path = args.socket or str(default_socket_path())
+    print(f"runneos-agents API: {path} (остановка: Ctrl+C)", flush=True)
+    try:
+        run_serve(path, Store)
+    except KeyboardInterrupt:
+        pass
+    print("API остановлен.")
+    return EXIT_OK
+
+
+# --- вывод -----------------------------------------------------------------
+
+
+
+def _want_json(args: argparse.Namespace) -> bool:
+    """Флаг --json может стоять до или после подкоманды; отсутствовать он тоже может."""
+    return bool(getattr(args, "json", False))
+
+def _emit(args: argparse.Namespace, payload: dict, human: str) -> None:
+    if _want_json(args):
+        print(json.dumps(payload, ensure_ascii=False))
+    else:
+        print(human)
+
+
+def _availability_dict(item) -> dict:
+    return {
+        "provider": item.provider,
+        "available": item.available,
+        "reason": item.reason,
+        "version": item.version,
+        "binary": item.binary,
+    }
+
+
+def _agent_dict(store: Store, agent: Agent) -> dict:
+    workspace = agent.workspace or resolve_workspace_path(agent, store.root)
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "role": agent.role,
+        "provider": agent.provider,
+        "state": agent.state,
+        "workspace": str(workspace),
+        "workspace_exists": Path(workspace).is_dir(),
+        "created_at": agent.created_at,
+        "sessions": len(store.list_sessions(agent.id, limit=1000)),
+    }
+
+
+def _session_dict(session) -> dict:
+    return {
+        "id": session.id,
+        "agent_id": session.agent_id,
+        "title": session.title,
+        "state": session.state,
+        "provider_session_id": session.provider_session_id,
+        "created_at": session.created_at,
+        "updated_at": session.updated_at,
+    }
+
+
+def _event_dict(event) -> dict:
+    return {
+        "seq": event.seq,
+        "kind": event.kind,
+        "created_at": event.created_at,
+        "payload": event.payload,
+    }
+
+
+if __name__ == "__main__":
+    sys.exit(main())

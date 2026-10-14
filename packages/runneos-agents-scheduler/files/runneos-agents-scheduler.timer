@@ -1,0 +1,13 @@
+# Опрос расписаний каждые 5 минут: сам сервис решает, что дозрело
+# (конфиг ~/.config/runneos/agents-schedules.json). Опрос дешёвый: без дозревших
+# задач не запускает ни одного провайдера.
+[Unit]
+Description=RunneOS Agents: опрос расписаний
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

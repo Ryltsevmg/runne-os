@@ -1,0 +1,49 @@
+#!/bin/bash
+# Create the RunneOS live desktop user before the console autologin.
+# The user is created once per boot (the live root is a tmpfs overlay) and gets
+# the packaged /etc/skel profile: Niri config, Ghostty config, DMS settings.
+set -euo pipefail
+user=runneos
+
+if ! id "$user" >/dev/null 2>&1; then
+	groups=""
+	for candidate in wheel video render input audio rfkill network storage power; do
+		if getent group "$candidate" >/dev/null; then
+			groups="${groups:+$groups,}$candidate"
+		fi
+	done
+	useradd --create-home --shell /usr/bin/zsh ${groups:+--groups "$groups"} "$user"
+fi
+
+# useradd copies /etc/skel; restore it if the home exists but is incomplete.
+if [ ! -e "/home/$user/.config/niri/config.kdl" ]; then
+	cp -a /etc/skel/. "/home/$user/"
+	chown -R "$user:$user" "/home/$user"
+fi
+
+# The live session is autologin-only and must not ask for a password.
+passwd -d "$user" >/dev/null 2>&1 || true
+
+# The live medium logs this user in on tty1 without a display manager: the
+# login shell starts the Niri session there. graphical-session.target then
+# pulls dms.service from /etc/systemd/user, so the shell comes up with it.
+profile="/home/$user/.zprofile"
+if ! grep -q 'runneos-live-session' "$profile" 2>/dev/null; then
+	cat >> "$profile" <<'HOOK'
+# runneos-live-session: start the desktop on the live console.
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -z "${RUNNEOS_LIVE_SESSION:-}" ] \
+   && [ "$(tty 2>/dev/null)" = /dev/tty1 ]; then
+	export RUNNEOS_LIVE_SESSION=1
+	# The user systemd instance is started asynchronously by the login manager:
+	# without it `systemctl --user` inside niri-session fails immediately.
+	for _ in $(seq 1 80); do
+		systemctl --user list-units --no-pager >/dev/null 2>&1 && break
+		sleep 0.25
+	done
+	niri-session
+	# Do not leave a dead console behind when the session does not come up.
+	exec zsh -l
+fi
+HOOK
+	chown "$user:$user" "$profile"
+fi

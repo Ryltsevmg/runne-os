@@ -1,0 +1,31 @@
+pkgname=runneos-software
+pkgver=0.1.1
+pkgrel=5
+pkgdesc='RunneOS application center for Arch, AUR, Flatpak and local software'
+arch=('any')
+license=('MIT')
+depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'archlinux-appstream-data'
+         'flatpak' 'pacman-contrib' 'polkit' 'snapper' 'runneos-launcher' 'runneos-theme>=0.2.0')
+# yay is an AUR helper and cannot come from the official repositories, so it is
+# not a hard dependency: the application center degrades to Arch/Flatpak/local
+# sources and reports the AUR source as unavailable, which is what lets the
+# desktop metapackage be installed from a clean ISO.
+optdepends=('yay: установка и обновление пакетов AUR')
+check() {
+  PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s "$startdir/../../tests" -p test_software.py -v
+  PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s "$startdir/../../tests" -p test_operations_journal.py -v
+}
+package() {
+  for file in catalog.py backend.py operations.py gui.py style.css update_cli.py; do
+    install -Dm644 "$startdir/files/$file" "$pkgdir/usr/lib/runneos-software/$file"
+  done
+  install -Dm755 "$startdir/files/polkit-sudo" "$pkgdir/usr/lib/runneos-software/polkit-sudo"
+  install -Dm755 "$startdir/files/runneos-software" "$pkgdir/usr/bin/runneos-software"
+  install -Dm755 "$startdir/files/runneos-update" "$pkgdir/usr/bin/runneos-update"
+  install -Dm755 "$startdir/files/install-panel.py" "$pkgdir/usr/bin/runneos-software-pin"
+  for file in plugin.json SoftwareLauncher.qml; do
+    install -Dm644 "$startdir/files/dms-plugin/$file" "$pkgdir/usr/share/runneos/software/dms-plugin/$file"
+  done
+  install -Dm644 "$startdir/files/org.runneos.Software.desktop" "$pkgdir/usr/share/applications/org.runneos.Software.desktop"
+  install -Dm644 "$startdir/files/runneos-software.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/runneos-software.svg"
+}

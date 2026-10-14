@@ -1,0 +1,1213 @@
+#!/usr/bin/python3
+"""Пульт локальных агентов RunneOS: GTK4 + libadwaita.
+
+Границы из packages/runneos-agents/INTERFACE.md (раздел 8):
+  * UI импортирует только runneos_agents (Store + Orchestrator) и не пишет SQL;
+  * длинная задача выполняется в отдельном потоке, UI обновляется через GLib.idle_add;
+  * прогресс читается инкрементально: list_events(session_id, limit=...) по возрастанию seq;
+  * во время прогона кнопка «Задача» неактивна и виден индикатор работы;
+  * панель не делает сетевых обращений и не показывает секретов: только журнал и состояние.
+
+Панель открывается и без ядра, и без провайдера: она честно сообщает причину,
+а не падает. Проверка без пользователя:
+
+    runneos-agents-panel --smoke-test [--root КАТАЛОГ] [--screenshot ФАЙЛ.png]
+"""
+import json
+import os
+from pathlib import Path
+import sys
+import threading
+from datetime import datetime
+
+# Ядро лежит рядом со скриптом в дереве исходников либо в /usr/share/runneos/agents
+# (так же ищет CLI). Без этого установленный запуск не находил модуль: панель
+# честно показывала «Ядро не найдено» вместо рабочего пульта (найдено живым
+# сеансом 2026-10-14).
+_PANEL_HERE = Path(__file__).resolve().parent
+for _candidate in (_PANEL_HERE, _PANEL_HERE / 'share', Path('/usr/share/runneos/agents')):
+    if (_candidate / 'runneos_agents' / '__init__.py').exists():
+        sys.path.insert(0, str(_candidate))
+        break
+
+import gi
+gi.require_version('Gtk','4.0');gi.require_version('Adw','1')
+from gi.repository import Gtk,Adw,GLib,Gio
+
+sys.path.insert(0,'/usr/share/runneos/theme')
+try:
+    from ui_style import Theme,wordmark
+except ImportError:
+    # Тема RunneOS ещё не установлена: панель остаётся работоспособной.
+    Theme=None
+    def wordmark(width=156):
+        fallback=Gtk.Label(label='Runne.OS')
+        fallback.add_css_class('title-3')
+        return fallback
+
+APP_ID='org.runneos.Agents'
+WINDOW_TITLE='Агенты · RunneOS'
+EVENT_BATCH=200          # сколько событий журнала читаем за один опрос
+MESSAGE_LIMIT=200        # сколько сообщений сессии показываем
+PROGRESS_LIMIT=300       # сколько строк хода держим в памяти
+PROGRESS_SHOWN=40        # сколько последних строк показываем в ленте хода
+POLL_INTERVAL=0.25       # период опроса журнала во время прогона, секунды
+CREATE_EXAMPLE='runneos-agents agent add my-agent --role «кратко о роли»'
+EXTRA_CSS='''
+.message-user {color:@ACCENT@;}
+.message-system {color:@MUTED@;font-style:italic;}
+.message-head {font-size:12px;}
+.progress-line {font-family:"JetBrains Mono",monospace;font-size:12px;}
+'''
+
+
+def import_core():
+    """Импортирует ядро по контракту. Возвращает (Store, Orchestrator, причина)."""
+    try:
+        from runneos_agents import Store,Orchestrator
+        return Store,Orchestrator,''
+    except Exception as error:
+        reason=f'{type(error).__name__}: {error}'
+    try:
+        from runneos_agents.store import Store
+        from runneos_agents.orchestrator import Orchestrator
+        return Store,Orchestrator,''
+    except Exception as error:
+        reason=f'{type(error).__name__}: {error}'
+    return None,None,reason
+
+
+STORE_CLASS,ORCHESTRATOR_CLASS,CORE_ERROR=import_core()
+
+
+def import_policy_api():
+    """Функции чтения/записи секции политики (v1.7); None — ядро старой версии."""
+    try:
+        from runneos_agents.policy import read_section,write_section
+        return read_section,write_section
+    except Exception:
+        return None,None
+
+
+POLICY_READ,POLICY_WRITE=import_policy_api()
+
+
+# --- Чистая логика: её проверяет tests/test_agents_panel.py без дисплея -------
+
+STATE_LABELS={'idle':'простаивает','running':'работает','waiting_user':'ждёт ответа',
+              'error':'ошибка','unavailable':'нет провайдера'}
+SESSION_LABELS={'open':'открыта','closed':'закрыта','error':'ошибка'}
+ROLE_LABELS={'user':'Вы','agent':'Агент','system':'Система'}
+NO_PROVIDER='нет провайдера'
+NO_AUTH='не авторизован'
+
+
+def state_label(state):
+    return STATE_LABELS.get(str(state or '').strip(),'состояние неизвестно')
+
+
+def session_label(state):
+    return SESSION_LABELS.get(str(state or '').strip(),'состояние неизвестно')
+
+
+def role_label(role):
+    return ROLE_LABELS.get(str(role or '').strip(),'Неизвестный отправитель')
+
+
+def format_time(value):
+    """ISO-8601 UTC из ядра → местное «12.10 в 07:26»; мусор → честное «неизвестно»."""
+    try:
+        return datetime.fromisoformat(str(value).replace('Z','+00:00')).astimezone().strftime('%d.%m в %H:%M')
+    except (ValueError,TypeError):
+        return 'время неизвестно'
+
+
+def shorten(text,limit=160):
+    text=' '.join(str(text or '').split())
+    return text if len(text)<=limit else text[:limit-1]+'…'
+
+
+def availability_index(providers):
+    """list[Availability] → {provider: Availability}."""
+    index={}
+    for item in providers or []:
+        provider=str(getattr(item,'provider','') or '')
+        if provider:index[provider]=item
+    return index
+
+
+def provider_problem(agent,providers):
+    """Причина недоступности провайдера агента или None, если он доступен."""
+    provider=str(getattr(agent,'provider','') or '')
+    if not provider:return 'провайдера нет: ключ адаптера не указан'
+    item=availability_index(providers).get(provider)
+    if item is None:return f'{NO_PROVIDER}: адаптер {provider} не зарегистрирован'
+    if not bool(getattr(item,'available',False)):
+        reason=shorten(getattr(item,'reason','') or '',120)
+        return f'{NO_PROVIDER}: {provider}'+(f' — {reason}' if reason else '')
+    return None
+
+
+def provider_badge(agent,providers):
+    """Метка «нет провайдера» для строки агента или None."""
+    return NO_PROVIDER if provider_problem(agent,providers) else None
+
+
+def authorization_index(authorizations):
+    """list[Authorization] → {provider: Authorization}."""
+    index={}
+    for item in authorizations or []:
+        provider=str(getattr(item,'provider','') or '')
+        if provider:index[provider]=item
+    return index
+
+
+def provider_auth_problem(agent,authorizations):
+    """Состояние «бинарь есть, вход не выполнен» или None.
+
+    Unknown (None от адаптера) — не проблема: честное «неизвестно» не считают отказом.
+    """
+    provider=str(getattr(agent,'provider','') or '')
+    if not provider:return None
+    item=authorization_index(authorizations).get(provider)
+    if item is None or getattr(item,'authorized',None) is not False:return None
+    how=str(getattr(item,'how','') or '').strip() or f'{provider} login'
+    detail=shorten(getattr(item,'detail','') or '',120)
+    return f'{NO_AUTH}: {provider} — подключить: {how}'+(f' ({detail})' if detail else '')
+
+
+def policy_rows(section):
+    """Секция policy → строки правил для списка (имя, команда, подкоманда, allow, note)."""
+    rules=(section or {}).get('rules') or []
+    rows=[]
+    for index,rule in enumerate(rules,1):
+        rows.append({
+            'name':str(rule.get('name') or f'rule-{index}'),
+            'command':str(rule.get('command') or ''),
+            'args':str(rule.get('args') or ''),
+            'allow':bool(rule.get('allow')),
+            'note':str(rule.get('note') or ''),
+        })
+    return rows
+
+
+def policy_add_rule(section,command,sub,allow,note):
+    """Новая секция с добавленным правилом; (None, причина), если команда пуста."""
+    command=str(command or '').strip()
+    if not command:return None,'команда не указана'
+    rules=list((section or {}).get('rules') or [])
+    rule={'command':command,'allow':bool(allow),'name':f"rule-{len(rules)+1}"}
+    if str(sub or '').strip():rule['args']=str(sub).strip()
+    if str(note or '').strip():rule['note']=str(note).strip()
+    result=dict(section or {});result['rules']=rules+[rule]
+    return result,''
+
+
+def policy_remove_rule(section,name):
+    """Новая секция без правила с этим именем."""
+    result=dict(section or {})
+    result['rules']=[rule for rule in ((section or {}).get('rules') or [])
+                     if str(rule.get('name'))!=str(name)]
+    return result
+
+
+def policy_set_enforce(section,enforce):
+    """Новая секция с переключённым принуждением."""
+    result=dict(section or {})
+    result['enforce']=bool(enforce)
+    return result
+
+
+def agent_title(agent):
+    name=str(getattr(agent,'name','') or '').strip()
+    identifier=str(getattr(agent,'id','') or '')
+    if not name or name==identifier:return identifier or 'без имени'
+    return f'{name} · {identifier}'
+
+
+def agent_subtitle(agent,providers):
+    parts=[]
+    role=shorten(getattr(agent,'role','') or '',80)
+    parts.append(role or 'роль не задана')
+    provider=str(getattr(agent,'provider','') or '')
+    item=availability_index(providers).get(provider)
+    if item is not None and bool(getattr(item,'available',False)):
+        version=shorten(getattr(item,'version','') or '',24)
+        provider=f'{provider} {version}'.strip()
+    parts.append(f'провайдер: {provider or "не указан"}')
+    return ' · '.join(parts)
+
+
+def session_title(session,index=None):
+    title=str(getattr(session,'title','') or '').strip()
+    if title:return title
+    return f'Сессия {index}' if index else 'Сессия без названия'
+
+
+def session_subtitle(session):
+    return f'{session_label(getattr(session,"state",""))} · обновлена {format_time(getattr(session,"updated_at",""))}'
+
+
+def message_header(message):
+    return f'{role_label(getattr(message,"role",""))} · {format_time(getattr(message,"created_at",""))}'
+
+
+def message_body(message):
+    return str(getattr(message,'text','') or '').strip() or 'Пустое сообщение'
+
+
+def usage_text(usage):
+    if not isinstance(usage,dict):return ''
+    parts=[]
+    for key,title in (('input_tokens','вход'),('output_tokens','выход')):
+        value=usage.get(key)
+        if isinstance(value,int):parts.append(f'{title}: {value}')
+    return 'токены · '+', '.join(parts) if parts else ''
+
+
+def event_text(event):
+    """Строка журнала для человека. Сырые payload не показываем: там бывают лишние данные."""
+    kind=str(getattr(event,'kind','') or '')
+    payload=getattr(event,'payload',None)
+    payload=payload if isinstance(payload,dict) else {}
+    if kind=='turn.started':return 'Ход начался'
+    if kind=='turn.completed':return 'Ход завершён'
+    if kind=='turn.finished':return 'Прогон завершён'
+    if kind in ('agent_message','item.completed'):return 'Агент: '+shorten(payload.get('text'))
+    if kind=='reasoning':return 'Размышление: '+shorten(payload.get('text'))
+    if kind=='command':return 'Команда: '+shorten(payload.get('text'))
+    if kind=='file_change':return 'Файл: '+shorten(payload.get('path') or payload.get('text'))
+    if kind=='usage':
+        summary=usage_text(payload.get('usage') if isinstance(payload.get('usage'),dict) else payload)
+        return summary or 'Расход токенов получен'
+    if kind=='provider_session':return 'Сессия провайдера получена'
+    if kind=='policy.decision':
+        verdict='разрешено' if payload.get('allowed') else 'запрещено'
+        mode='принуждение' if payload.get('enforce') else 'только аудит'
+        return 'Политика: '+verdict+' ('+mode+', '+str(payload.get('rule') or '—')+')'
+    if kind=='error':return 'Ошибка провайдера: '+shorten(payload.get('text'))
+    if kind=='user_message':return 'Задача отправлена'
+    if kind=='stdout':return 'Вывод: '+shorten(payload.get('text'))
+    if kind=='stderr':return 'Диагностика: '+shorten(payload.get('text'))
+    if kind=='raw':return 'Событие провайдера'
+    return 'Событие: '+(kind or 'без типа')
+
+
+def new_events(events,last_seq):
+    """Возвращает (свежие события по возрастанию seq, наибольший seq)."""
+    ordered=sorted(events or [],key=lambda event:getattr(event,'seq',0) or 0)
+    fresh=[event for event in ordered if (getattr(event,'seq',0) or 0)>last_seq]
+    newest=(getattr(fresh[-1],'seq',0) or 0) if fresh else last_seq
+    return fresh,newest
+
+
+def ask_enabled(*,core_ready,running,agent_id,prompt):
+    """Кнопка «Задача» активна только когда есть ядро, агент, текст и нет прогона."""
+    return bool(core_ready) and not running and bool(agent_id) and bool(str(prompt or '').strip())
+
+
+def turn_failure_text(result=None,error=None):
+    """Честное сообщение об ошибке прогона: причина ядра, без трассировки."""
+    if error is not None:
+        message=error if isinstance(error,str) else f'{type(error).__name__}: {error}'
+        return 'Прогон не выполнен: '+shorten(message,240)
+    message=str(getattr(result,'error','') or '').strip()
+    if message:return 'Прогон не удался: '+shorten(message,240)
+    return 'Прогон не удался, причина не указана. Подробности — в журнале сессии.'
+
+
+def placeholders(kind,error=''):
+    """(заголовок, пояснение, иконка) для пустых состояний и отсутствия ядра."""
+    if kind=='no_core':
+        reason=shorten(error or CORE_ERROR or 'модуль runneos_agents не импортируется',200)
+        return ('Ядро runneos_agents не найдено',
+                f'Панель работает без ядра и ничего не запускает. Причина: {reason}. '
+                'Установите пакет runneos-agents и выполните «runneos-agents init».',
+                'dialog-warning-symbolic')
+    if kind=='no_agent':
+        return ('Агент не выбран','Выберите агента в списке слева.','system-users-symbolic')
+    if kind=='no_agents':
+        return ('Нет агентов',
+                f'Создайте первого агента командой: {CREATE_EXAMPLE}. Затем нажмите кнопку обновления. '
+                'Провайдер (codex или opencode) должен быть установлен отдельно.',
+                'system-users-symbolic')
+    if kind=='no_sessions':
+        return ('У агента нет сессий',
+                'Отправьте первую задачу ниже — сессия создастся автоматически. '
+                'Журнал прошлых сессий: runneos-agents sessions ИД_АГЕНТА.',
+                'document-open-recent-symbolic')
+    if kind=='no_messages':
+        return ('Сообщений пока нет',
+                'Введите задачу и нажмите «Задача». Здесь появятся сообщения, ход выполнения и ответ агента.',
+                'mail-unread-symbolic')
+    return ('','','')  # pragma: no cover - неизвестный вид вызывается только из ошибки
+
+
+def providers_summary(providers):
+    """Данные о провайдерах для отчёта --smoke-test: без секретов."""
+    return [{'provider':str(getattr(item,'provider','') or ''),
+             'available':bool(getattr(item,'available',False)),
+             'version':str(getattr(item,'version','') or ''),
+             'reason':shorten(getattr(item,'reason','') or '',120)} for item in providers or []]
+
+
+# --- Виджеты ----------------------------------------------------------------
+
+def label(text,css='',**kwargs):
+    widget=Gtk.Label(label=text,xalign=0,wrap=True,**kwargs)
+    for name in css.split():widget.add_css_class(name)
+    return widget
+
+
+def box(spacing=12,orientation=Gtk.Orientation.VERTICAL):
+    return Gtk.Box(orientation=orientation,spacing=spacing)
+
+
+def markup(text):
+    """Adw.ActionRow и описание Adw.StatusPage разбирают Pango-разметку:
+    имена агентов и причины провайдеров экранируем, а не показываем как теги."""
+    return GLib.markup_escape_text(str('' if text is None else text))
+
+
+def margined(widget,size):
+    for side in ('top','bottom','start','end'):getattr(widget,'set_margin_'+side)(size)
+    return widget
+
+
+def message_widget(message):
+    """Строка ленты: метка роли и времени + обычный текст (агент не жирным)."""
+    role=str(getattr(message,'role','') or '')
+    row=box(4)
+    row.message_role=role
+    row.add_css_class('message')
+    row.add_css_class('message-'+role if role in ROLE_LABELS else 'message-unknown')
+    row.append(label(message_header(message),'dim-label message-head'))
+    body=label(message_body(message),'message-body message-'+role if role in ROLE_LABELS else 'message-body')
+    body.set_selectable(True)
+    row.append(body)
+    return row
+
+
+class AgentsPanel(Adw.ApplicationWindow):
+    def __init__(self,application,root=None,dispatch=None):
+        super().__init__(application=application,title=WINDOW_TITLE,default_width=1120,default_height=780)
+        self.dispatch=dispatch or GLib.idle_add
+        self.root=Path(root).expanduser() if root else None
+        self.store=None
+        self.orchestrator=None
+        self.core_error=CORE_ERROR
+        self.closed=False
+        self.running=False
+        self.last_result=None
+        self.last_error=None
+        self.agents=[]
+        self.sessions=[]
+        self.messages=[]
+        self.progress=[]
+        self.providers=[]
+        self.authorizations=[]
+        self.selected_agent_id=None
+        self.selected_session_id=None
+        self.run_thread=None
+        self.log_thread=None
+        self.providers_thread=None
+        self.agent_rows={}
+        self.session_rows={}
+        self._build()
+        self.open_store()
+        self.reload_agents()
+        self.refresh_providers()
+        self.update_ask_button()
+        self.connect('close-request',self.on_close)
+
+    # -- сборка окна ---------------------------------------------------------
+
+    def _build(self):
+        self.split=Adw.NavigationSplitView()
+        self.split.set_min_sidebar_width(300)
+        self.split.set_max_sidebar_width(400)
+        self.split.set_sidebar_width_fraction(0.30)
+        self.split.set_sidebar(Adw.NavigationPage(title='Агенты',child=self._sidebar()))
+        self.split.set_content(Adw.NavigationPage(title='Задачи',child=self._content()))
+        self.set_content(self.split)
+        if Theme is not None:
+            self.theme=Theme(self,extra_css=EXTRA_CSS,wordmarks=[self.brand_logo])
+
+    def _sidebar(self):
+        toolbar=Adw.ToolbarView()
+        header=Adw.HeaderBar()
+        self.brand_logo=wordmark(124)
+        header.set_title_widget(self.brand_logo)
+        refresh=Gtk.Button(icon_name='view-refresh-symbolic',tooltip_text='Обновить агентов и провайдеров')
+        refresh.connect('clicked',lambda _:self.refresh_all())
+        header.pack_end(refresh)
+        toolbar.add_top_bar(header)
+        self.agent_list=Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
+        self.agent_list.add_css_class('boxed-list')
+        self.agent_list.connect('row-selected',self.on_agent_selected)
+        holder=margined(box(12),12)
+        holder.append(self.agent_list)
+        scroller=Gtk.ScrolledWindow(vexpand=True,hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroller.set_child(holder)
+        self.agent_placeholder=Adw.StatusPage(icon_name='system-users-symbolic')
+        self.agent_stack=Gtk.Stack()
+        self.agent_stack.add_named(scroller,'list')
+        self.agent_stack.add_named(self.agent_placeholder,'empty')
+        toolbar.set_content(self.agent_stack)
+        return toolbar
+
+    def _content(self):
+        toolbar=Adw.ToolbarView()
+        header=Adw.HeaderBar()
+        self.agent_heading=label('Агент не выбран','title-3')
+        header.set_title_widget(self.agent_heading)
+        self.run_spinner=Gtk.Spinner(tooltip_text='Прогон выполняется')
+        header.pack_start(self.run_spinner)
+        self.policy_button=Gtk.Button(label='Политика',tooltip_text='Правила и принуждение выбранного агента')
+        self.policy_button.set_sensitive(False)
+        self.policy_button.connect('clicked',self.on_policy_clicked)
+        header.pack_end(self.policy_button)
+        self.refresh_button=Gtk.Button(icon_name='view-refresh-symbolic',tooltip_text='Обновить данные агента')
+        self.refresh_button.connect('clicked',lambda _:self.refresh_all())
+        header.pack_end(self.refresh_button)
+        toolbar.add_top_bar(header)
+        paned=Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL,position=300,shrink_start_child=False)
+        paned.set_start_child(self._sessions_pane())
+        paned.set_end_child(self._feed_pane())
+        toolbar.set_content(paned)
+        return toolbar
+
+    def _sessions_pane(self):
+        pane=box(0)
+        pane.append(margined(label('Сессии','title-3'),12))
+        self.session_list=Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
+        self.session_list.add_css_class('boxed-list')
+        self.session_list.connect('row-selected',self.on_session_selected)
+        holder=margined(box(12),12)
+        holder.append(self.session_list)
+        scroller=Gtk.ScrolledWindow(vexpand=True,hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroller.set_child(holder)
+        self.session_placeholder=Adw.StatusPage(icon_name='document-open-recent-symbolic')
+        # Узкая колонка: для «сессий нет» довольно короткой подсказки, а не большой страницы.
+        self.session_hint=label('Сессий пока нет. Отправьте первую задачу ниже — сессия создастся автоматически.','dim-label')
+        self.session_hint.set_justify(Gtk.Justification.CENTER)
+        self.session_hint.set_halign(Gtk.Align.CENTER)
+        self.session_hint.set_valign(Gtk.Align.CENTER)
+        self.session_hint.set_max_width_chars(34)
+        self.session_hint.set_margin_start(18)
+        self.session_hint.set_margin_end(18)
+        self.session_stack=Gtk.Stack(vexpand=True)
+        self.session_stack.add_named(scroller,'list')
+        self.session_stack.add_named(self.session_placeholder,'empty')
+        self.session_stack.add_named(self.session_hint,'hint')
+        pane.append(self.session_stack)
+        return pane
+
+    def _feed_pane(self):
+        pane=box(0)
+        self.message_box=margined(box(16),18)
+        self.message_scroll=Gtk.ScrolledWindow(vexpand=True,hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.message_scroll.set_child(self.message_box)
+        self.feed_placeholder=Adw.StatusPage(icon_name='mail-unread-symbolic')
+        self.feed_stack=Gtk.Stack(vexpand=True)
+        self.feed_stack.add_named(self.message_scroll,'messages')
+        self.feed_stack.add_named(self.feed_placeholder,'empty')
+        pane.append(self.feed_stack)
+        bottom=margined(box(8),12)
+        self.status_label=label('Готово','dim-label')
+        self.progress_box=box(2)
+        progress_scroll=Gtk.ScrolledWindow(max_content_height=120,hscrollbar_policy=Gtk.PolicyType.NEVER)
+        progress_scroll.set_child(margined(self.progress_box,4))
+        self.progress_revealer=Gtk.Revealer()
+        self.progress_revealer.set_child(progress_scroll)
+        self.progress_revealer.set_reveal_child(False)
+        input_row=box(8,Gtk.Orientation.HORIZONTAL)
+        self.prompt_entry=Gtk.Entry(placeholder_text='Опишите задачу агенту',hexpand=True)
+        self.prompt_entry.connect('changed',self.on_prompt_changed)
+        self.prompt_entry.connect('activate',lambda _:self.start_task())
+        self.ask_button=Gtk.Button(label='Задача')
+        self.ask_button.add_css_class('suggested-action')
+        self.ask_button.connect('clicked',lambda _:self.start_task())
+        input_row.append(self.prompt_entry)
+        input_row.append(self.ask_button)
+        bottom.append(self.status_label)
+        bottom.append(self.progress_revealer)
+        bottom.append(input_row)
+        pane.append(bottom)
+        return pane
+
+    # -- хранилище ядра ------------------------------------------------------
+
+    @property
+    def core_ready(self):
+        return self.store is not None and ORCHESTRATOR_CLASS is not None
+
+    def new_store(self):
+        """Новое соединение с хранилищем (у каждого потока — своё)."""
+        if STORE_CLASS is None:return None
+        return STORE_CLASS(self.root)
+
+    def open_store(self):
+        if STORE_CLASS is None:
+            self.store=None
+            return None
+        try:
+            self.store=self.new_store()
+            self.orchestrator=None
+        except Exception as error:
+            self.core_error=f'{type(error).__name__}: {error}'
+            self.store=None
+        return self.store
+
+    def make_orchestrator(self,store):
+        return ORCHESTRATOR_CLASS(store)
+
+    def schedule(self,callback,*args):
+        """Единственный путь обновления UI из фоновых потоков."""
+        if self.closed:return
+        self.dispatch(callback,*args)
+
+    def close_store(self,store):
+        if store is None:return
+        try:
+            store.close()
+        except Exception:
+            pass
+
+    def on_close(self,*_):
+        self.closed=True
+        self.close_store(self.store)
+        self.store=None
+
+    # -- данные --------------------------------------------------------------
+
+    def refresh_all(self):
+        self.reload_agents()
+        if self.selected_agent_id:
+            self.reload_sessions()
+            self.reload_messages()
+        self.refresh_providers()
+
+    def reload_agents(self):
+        self.agent_list.remove_all()
+        self.agent_rows={}
+        if self.store is None:
+            self.agents=[]
+            self.show_agents_empty('no_core')
+            self.selected_agent_id=None
+            self.sessions=[];self.messages=[]
+            self.render_sessions();self.render_messages()
+            self.update_ask_button()
+            return
+        try:
+            self.agents=list(self.store.list_agents() or [])
+        except Exception as error:
+            self.agents=[]
+            self.set_status(f'Не удалось прочитать список агентов: {shorten(error,160)}')
+        identifiers=[str(getattr(agent,'id','')) for agent in self.agents]
+        if self.selected_agent_id not in identifiers:self.selected_agent_id=identifiers[0] if identifiers else None
+        self.render_agents()
+        if not self.agents:
+            self.selected_agent_id=None
+            self.sessions=[];self.messages=[]
+            self.show_agents_empty('no_agents')
+            self.render_sessions();self.render_messages()
+        elif self.selected_agent_id:
+            self.reload_sessions()
+            self.reload_messages()
+        self.update_ask_button()
+
+    def render_agents(self):
+        self.agent_list.remove_all()
+        self.agent_rows={}
+        for agent in self.agents:
+            identifier=str(getattr(agent,'id',''))
+            row=Adw.ActionRow(title=markup(agent_title(agent)),subtitle=markup(agent_subtitle(agent,self.providers)))
+            row.agent_id=identifier
+            row.set_activatable(True)
+            # Узкая колонка: ограничиваем число строк, иначе заголовок сжимается по буквам.
+            row.set_title_lines(1)
+            row.set_subtitle_lines(2)
+            problem=provider_problem(agent,self.providers)
+            auth_problem=None if problem else provider_auth_problem(agent,self.authorizations)
+            badge=NO_PROVIDER if problem else (NO_AUTH if auth_problem else None)
+            # Метки доступности и состояния — одной колонкой: в узком списке иначе
+            # заголовок сжимается многоточием.
+            trailing=box(2)
+            trailing.set_valign(Gtk.Align.CENTER)
+            trailing.set_margin_start(6)
+            if badge:
+                mark=label(badge,'warning')
+                mark.set_valign(Gtk.Align.CENTER)
+                if problem:mark.set_tooltip_text(problem)
+                elif auth_problem:mark.set_tooltip_text(auth_problem)
+                trailing.append(mark)
+            state=state_label(getattr(agent,'state',''))
+            # «нет провайдера» уже стоит меткой доступности: не повторяем тем же словом.
+            if not (badge and state==NO_PROVIDER):
+                mark=label(state,'dim-label')
+                mark.set_valign(Gtk.Align.CENTER)
+                trailing.append(mark)
+            if trailing.get_first_child() is not None:row.add_suffix(trailing)
+            self.agent_list.append(row)
+            self.agent_rows[identifier]=row
+        self.update_agent_heading()
+        if self.agents:
+            self.agent_stack.set_visible_child_name('list')
+            row=self.agent_rows.get(self.selected_agent_id)
+            if row is not None:self.agent_list.select_row(row)
+
+    def show_agents_empty(self,kind):
+        self.set_placeholder(self.agent_placeholder,kind)
+        self.agent_stack.set_visible_child_name('empty')
+
+    def empty_kind(self):
+        """Вид пустого состояния для панелей сессий и сообщений."""
+        if self.store is None:return 'no_core'
+        if not self.agents:return 'no_agents'
+        if not self.selected_agent_id:return 'no_agent'
+        return None
+
+    def messages_empty_kind(self):
+        kind=self.empty_kind()
+        if kind is not None:return kind
+        return 'no_messages' if self.selected_session_id else 'no_sessions'
+
+    def set_placeholder(self,page,kind,error=''):
+        title,description,icon=placeholders(kind,error or self.core_error)
+        page.set_title(title)
+        page.set_description(markup(description))
+        page.set_icon_name(icon)
+
+    def reload_sessions(self,keep=None):
+        if self.store is None or not self.selected_agent_id:
+            self.sessions=[]
+            self.render_sessions()
+            self.update_ask_button()
+            return
+        try:
+            self.sessions=list(self.store.list_sessions(self.selected_agent_id) or [])
+        except Exception as error:
+            self.sessions=[]
+            self.set_status(f'Не удалось прочитать сессии: {shorten(error,160)}')
+        if keep is not None:self.selected_session_id=keep
+        identifiers=[str(getattr(session,'id','')) for session in self.sessions]
+        if self.selected_session_id and self.selected_session_id not in identifiers:
+            try:
+                session=self.store.get_session(self.selected_session_id)
+            except Exception:
+                session=None
+            if session is not None:self.sessions=[session]+self.sessions
+            else:self.selected_session_id=None
+        if not self.selected_session_id and self.sessions:
+            self.selected_session_id=str(getattr(self.sessions[0],'id',''))
+        self.render_sessions()
+        self.update_ask_button()
+
+    def render_sessions(self):
+        self.session_list.remove_all()
+        self.session_rows={}
+        for index,session in enumerate(self.sessions,1):
+            identifier=str(getattr(session,'id',''))
+            row=Adw.ActionRow(title=markup(session_title(session,index)),subtitle=markup(session_subtitle(session)))
+            row.session_id=identifier
+            row.set_activatable(True)
+            row.set_title_lines(1)
+            row.set_subtitle_lines(1)
+            self.session_list.append(row)
+            self.session_rows[identifier]=row
+        if self.sessions:
+            self.session_stack.set_visible_child_name('list')
+            row=self.session_rows.get(self.selected_session_id)
+            if row is not None:self.session_list.select_row(row)
+        else:
+            kind=self.empty_kind()
+            if kind is None:
+                self.session_stack.set_visible_child_name('hint')
+            else:
+                self.set_placeholder(self.session_placeholder,kind)
+                self.session_stack.set_visible_child_name('empty')
+
+    def reload_messages(self,session_id=None):
+        session_id=session_id or self.selected_session_id
+        if self.store is None or not session_id:
+            self.messages=[]
+            self.render_messages()
+            return
+        try:
+            self.messages=list(self.store.list_messages(session_id,limit=MESSAGE_LIMIT) or [])
+        except Exception as error:
+            self.messages=[]
+            self.set_status(f'Не удалось прочитать сообщения: {shorten(error,160)}')
+        self.render_messages()
+
+    def show_messages(self,messages):
+        self.messages=list(messages or [])
+        self.render_messages()
+
+    def render_messages(self):
+        while child:=self.message_box.get_first_child():self.message_box.remove(child)
+        for message in self.messages:self.message_box.append(message_widget(message))
+        if self.messages:
+            self.feed_stack.set_visible_child_name('messages')
+            self.schedule(self.scroll_messages)
+        else:
+            self.set_placeholder(self.feed_placeholder,self.messages_empty_kind())
+            self.feed_stack.set_visible_child_name('empty')
+
+    def scroll_messages(self):
+        adjustment=self.message_scroll.get_vadjustment()
+        if adjustment is not None:adjustment.set_value(max(0,adjustment.get_upper()-adjustment.get_page_size()))
+        return False
+
+    def append_progress(self,lines):
+        self.progress.extend(str(line) for line in lines)
+        del self.progress[:-PROGRESS_LIMIT]
+        self.render_progress()
+
+    def render_progress(self):
+        while child:=self.progress_box.get_first_child():self.progress_box.remove(child)
+        for line in self.progress[-PROGRESS_SHOWN:]:
+            self.progress_box.append(label(line,'dim-label progress-line'))
+        self.progress_revealer.set_reveal_child(bool(self.progress))
+
+    def set_status(self,text):
+        self.status_label.set_text(str(text))
+
+    # -- провайдеры ----------------------------------------------------------
+
+    def refresh_providers(self):
+        if self.store is None or ORCHESTRATOR_CLASS is None:
+            self.providers=[]
+            self.authorizations=[]
+            self.render_agents()
+            return None
+        if self.providers_thread is not None and self.providers_thread.is_alive():return self.providers_thread
+
+        def work():
+            store=None
+            try:
+                store=self.new_store()
+                orchestrator=self.make_orchestrator(store)
+                providers=list(orchestrator.providers() or [])
+                # Состояние входа спрашиваем только у доступных провайдеров: где бинаря нет,
+                # оно по определению неизвестно, лишний процесс не нужен.
+                authorizations=[
+                    orchestrator.authorization(str(item.provider))
+                    for item in providers if item.available
+                ]
+            except Exception as error:
+                self.schedule(self.note_provider_error,error)
+                return
+            finally:
+                self.close_store(store)
+            self.schedule(self.providers_ready,providers,authorizations)
+
+        self.providers_thread=threading.Thread(target=work,daemon=True,name='runneos-agents-providers')
+        self.providers_thread.start()
+        return self.providers_thread
+
+    def providers_ready(self,providers,authorizations=None):
+        self.providers=list(providers or [])
+        self.authorizations=list(authorizations or [])
+        self.render_agents()
+
+    def note_provider_error(self,error):
+        self.providers=[]
+        self.authorizations=[]
+        self.render_agents()
+        self.set_status(f'Не удалось получить список провайдеров: {shorten(error,160)}')
+
+    # -- выбор ---------------------------------------------------------------
+
+    def update_agent_heading(self):
+        agent=next((item for item in self.agents if str(getattr(item,'id',''))==self.selected_agent_id),None)
+        self.agent_heading.set_text(agent_title(agent) if agent is not None else 'Агент не выбран')
+        self.policy_button.set_sensitive(agent is not None and POLICY_WRITE is not None)
+
+    # -- политика агента (v1.7) -----------------------------------------------
+
+    def on_policy_clicked(self,*_):
+        agent=next((item for item in self.agents if str(getattr(item,'id',''))==self.selected_agent_id),None)
+        if agent is None or POLICY_READ is None or POLICY_WRITE is None:
+            self.set_status('Редактирование политики недоступно: нужно ядро runneos_agents 0.6.0+')
+            return
+        workspace=str(getattr(agent,'workspace','') or '') or str(Path(self.root)/'workspaces'/str(getattr(agent,'id','')))
+        dialog=PolicyDialog(self,agent,workspace)
+        dialog.window.present()
+
+    def on_agent_selected(self,listbox,row):
+        # remove_all() при перерисовке даёт row-selected(None): выбор терять нельзя.
+        if row is None:return
+        identifier=str(getattr(row,'agent_id','') or '')
+        if identifier==(self.selected_agent_id or ''):return
+        self.selected_agent_id=identifier or None
+        self.selected_session_id=None
+        self.update_agent_heading()
+        self.reload_sessions()
+        self.reload_messages()
+        self.update_ask_button()
+
+    def on_session_selected(self,listbox,row):
+        if row is None:return
+        identifier=str(getattr(row,'session_id','') or '')
+        if identifier==(self.selected_session_id or ''):return
+        self.selected_session_id=identifier or None
+        self.reload_messages()
+
+    def on_prompt_changed(self,*_):
+        self.update_ask_button()
+
+    def update_ask_button(self):
+        enabled=ask_enabled(core_ready=self.core_ready,running=self.running,
+                            agent_id=self.selected_agent_id,prompt=self.prompt_entry.get_text())
+        self.ask_button.set_sensitive(enabled)
+        if enabled or self.running:
+            self.ask_button.set_tooltip_text(None)
+        elif not self.core_ready:
+            self.ask_button.set_tooltip_text('Ядро runneos_agents недоступно')
+        elif not self.selected_agent_id:
+            self.ask_button.set_tooltip_text('Сначала выберите агента')
+        else:
+            self.ask_button.set_tooltip_text('Введите текст задачи')
+
+    def set_running(self,running):
+        self.running=bool(running)
+        self.prompt_entry.set_sensitive(not self.running)
+        if self.running:self.run_spinner.start()
+        else:self.run_spinner.stop()
+        self.update_ask_button()
+
+    # -- прогон задачи -------------------------------------------------------
+
+    def target_session(self,agent_id):
+        """Сессия для задачи: выбранная пользователем, иначе открытая, иначе новая."""
+        if self.store is None:return None
+        if self.selected_session_id:
+            session=self.store.get_session(self.selected_session_id)
+            if session is not None and str(getattr(session,'agent_id',''))==agent_id:
+                return self.selected_session_id
+        session=self.store.latest_open_session(agent_id)
+        if session is None:session=self.store.create_session(agent_id)
+        self.selected_session_id=str(getattr(session,'id','')) or None
+        return self.selected_session_id
+
+    def start_task(self):
+        prompt=self.prompt_entry.get_text().strip()
+        if not ask_enabled(core_ready=self.core_ready,running=self.running,
+                           agent_id=self.selected_agent_id,prompt=prompt):
+            if not self.core_ready:
+                self.set_status('Ядро runneos_agents недоступно: '+shorten(self.core_error or 'модуль не найден',160))
+            elif not self.selected_agent_id:
+                self.set_status('Сначала выберите агента в списке слева.')
+            elif not prompt:
+                self.set_status('Введите текст задачи.')
+            return
+        agent_id=self.selected_agent_id
+        try:
+            session_id=self.target_session(agent_id)
+        except Exception as error:
+            self.set_status(f'Не удалось подготовить сессию: {shorten(error,160)}')
+            return
+        if session_id is None:
+            self.set_status('Не удалось открыть сессию: хранилище недоступно.')
+            return
+        self.prompt_entry.set_text('')
+        self.progress.clear()
+        self.render_progress()
+        self.set_running(True)
+        self.set_status(f'Выполняем задачу агента {agent_id}…')
+        self.reload_sessions(keep=session_id)
+        self.reload_messages(session_id)
+        self.run_thread=threading.Thread(target=self.run_task,args=(agent_id,prompt,session_id),
+                                         daemon=True,name='runneos-agents-run')
+        self.run_thread.start()
+
+    def run_task(self,agent_id,prompt,session_id):
+        """Фоновый поток: ask() ядра + отдельный поток чтения журнала."""
+        store=None
+        stop=threading.Event()
+        try:
+            store=self.new_store()
+            if store is None:raise RuntimeError('ядро runneos_agents недоступно')
+            self.log_thread=threading.Thread(target=self.poll_events,args=(session_id,stop),
+                                             daemon=True,name='runneos-agents-log')
+            self.log_thread.start()
+            result=self.make_orchestrator(store).ask(agent_id,prompt,session_id=session_id)
+            stop.set()
+            self.log_thread.join(timeout=5)
+            self.schedule(self.finish_task,result,None,session_id)
+        except Exception as error:
+            stop.set()
+            if self.log_thread is not None:self.log_thread.join(timeout=5)
+            self.schedule(self.finish_task,None,error,session_id)
+        finally:
+            self.close_store(store)
+
+    def poll_events(self,session_id,stop):
+        """Инкрементальное чтение журнала: только события с seq больше последнего."""
+        store=None
+        last_seq=0
+        try:
+            store=self.new_store()
+            if store is None:return
+            while not stop.wait(POLL_INTERVAL):
+                last_seq=self.poll_once(store,session_id,last_seq)
+            self.poll_once(store,session_id,last_seq)
+        except Exception as error:
+            self.schedule(self.append_progress,[f'Журнал недоступен: {shorten(error,160)}'])
+        finally:
+            self.close_store(store)
+
+    def poll_once(self,store,session_id,last_seq):
+        events=list(store.list_events(session_id,limit=EVENT_BATCH) or [])
+        fresh,newest=new_events(events,last_seq)
+        if not fresh:return last_seq
+        self.schedule(self.append_progress,[event_text(event) for event in fresh])
+        try:
+            messages=list(store.list_messages(session_id,limit=MESSAGE_LIMIT) or [])
+        except Exception:
+            messages=None
+        if messages is not None:self.schedule(self.show_messages,messages)
+        return newest
+
+    def finish_task(self,result,error,session_id=None):
+        self.set_running(False)
+        self.last_result=result
+        self.last_error=error
+        if error is not None:
+            message=turn_failure_text(error=error)
+            self.set_status(message)
+            self.append_progress([message])
+        elif result is not None and not bool(getattr(result,'ok',False)):
+            message=turn_failure_text(result)
+            self.set_status(message)
+            self.append_progress([message])
+        else:
+            summary=usage_text(getattr(result,'usage',None)) if result is not None else ''
+            self.set_status('Готово'+(f' · {summary}' if summary else ''))
+        session_id=session_id or (str(getattr(result,'session_id','') or '') if result is not None else '') or self.selected_session_id
+        self.reload_agents()
+        self.reload_sessions(keep=session_id)
+        self.reload_messages(session_id)
+        self.refresh_providers()
+
+
+class PolicyDialog:
+    """Диалог политики агента (v1.7): правила, принуждение, запись через ядро.
+
+    Правки накапливаются в `self.section` чистыми функциями (policy_*); запись —
+    `write_section` ядра, которое отвергает сломанную секцию. Пустая политика
+    (нет правил и принуждение выключено) сохраняется удалением секции: это
+    честное «работает набор по умолчанию», а не видимость настройки.
+    """
+
+    def __init__(self,parent,agent,workspace):
+        self.parent=parent
+        self.agent=agent
+        self.workspace=workspace
+        self.section=POLICY_READ(workspace) if POLICY_READ is not None else None
+        self.Adw,Gtk,GLib=Adw,Gtk,GLib
+
+        self.window=Adw.Window(transient_for=parent,modal=True,
+                               title=f'Политика · {agent_title(agent)}')
+        self.window.set_default_size(560,440)
+
+        header=Adw.HeaderBar()
+        title=label(f'Политика · {agent_title(agent)}','title')
+        header.set_title_widget(title)
+
+        content=box(10)
+        content.set_margin_top(12);content.set_margin_bottom(12)
+        content.set_margin_start(12);content.set_margin_end(12)
+
+        enforce_section=self.section if isinstance(self.section,dict) else {}
+        self.enforce_switch=Gtk.Switch(active=bool(enforce_section.get('enforce')))
+        enforce_row=Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,spacing=8)
+        enforce_label=label('Принуждение: ход запрещён, если правило не пускает','')
+        enforce_label.set_wrap(True);enforce_label.set_xalign(0);enforce_label.set_hexpand(True)
+        enforce_row.append(enforce_label);enforce_row.append(self.enforce_switch)
+        self.enforce_switch.connect('notify::active',self._mark_dirty)
+        content.append(enforce_row)
+
+        self.rules_list=Gtk.ListBox();self.rules_list.add_css_class('boxed-list')
+        content.append(self.rules_list)
+        self.render_rules()
+
+        add_row=Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,spacing=6)
+        self.command_entry=Gtk.Entry(placeholder_text='команда (например git)')
+        self.command_entry.set_hexpand(True)
+        self.args_entry=Gtk.Entry(placeholder_text='подкоманда (например status)',width_chars=14)
+        self.allow_check=Gtk.CheckButton(label='разрешить',active=True)
+        add_button=Gtk.Button(label='Добавить')
+        add_button.connect('clicked',self.on_add_rule)
+        for item in (self.command_entry,self.args_entry,self.allow_check,add_button):add_row.append(item)
+        content.append(add_row)
+
+        self.status=label('','dim-label')
+        self.status.set_wrap(True);self.status.set_xalign(0)
+        content.append(self.status)
+
+        buttons=Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,spacing=8)
+        buttons.set_halign(Gtk.Align.END)
+        close=Gtk.Button(label='Закрыть')
+        close.connect('clicked',lambda *_:self.window.destroy())
+        buttons.append(close)
+        self.save=Gtk.Button(label='Сохранить')
+        self.save.add_css_class('suggested-action')
+        self.save.connect('clicked',self.on_save)
+        buttons.append(self.save)
+        content.append(buttons)
+
+        root=Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        root.append(header);root.append(content)
+        scroller=Gtk.ScrolledWindow(vexpand=True,hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroller.set_child(content)
+        root=Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        root.append(header);root.append(scroller);root.append(self._button_bar(close,self.save))
+        self.window.set_content(root)
+
+    def _button_bar(self,close,save):
+        bar=Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,spacing=8)
+        bar.set_margin_bottom(12);bar.set_margin_end(12);bar.set_halign(Gtk.Align.END)
+        bar.append(close);bar.append(save)
+        return bar
+
+    def _mark_dirty(self,*_):pass
+
+    def render_rules(self):
+        self.rules_list.remove_all()
+        for row in policy_rows(self.section):
+            line=Adw.ActionRow(
+                title=markup(('разрешить' if row['allow'] else 'запретить')+' '+row['command']+((' '+row['args']) if row['args'] else '')),
+                subtitle=markup(row['name']+((' — '+row['note']) if row['note'] else '')))
+            remove=Gtk.Button(icon_name='user-trash-symbolic',tooltip_text='Убрать правило')
+            remove.connect('clicked',self._on_remove,row['name'])
+            line.add_suffix(remove)
+            self.rules_list.append(line)
+        if not policy_rows(self.section):
+            hint=Adw.ActionRow(title=markup('Явных правил нет'),
+                               subtitle=markup('Набор по умолчанию: чтение; запуск провайдера допущен (аудит)'))
+            self.rules_list.append(hint)
+
+    def _on_remove(self,button,name):
+        self.section=policy_remove_rule(self.section,name)
+        self.render_rules()
+
+    def on_add_rule(self,*_):
+        section,error=policy_add_rule(self.section,self.command_entry.get_text(),
+                                      self.args_entry.get_text(),self.allow_check.get_active(),'')
+        if error:
+            self.status.set_text(error);return
+        self.section=section
+        self.command_entry.set_text('');self.args_entry.set_text('')
+        self.render_rules()
+
+    def on_save(self,*_):
+        if POLICY_WRITE is None:
+            self.status.set_text('Ядро не поддерживает запись политики');return
+        section=self.section
+        rows=policy_rows(section)
+        if not rows and not (section or {}).get('enforce'):
+            section=None  # пустая политика = честное «по умолчанию»
+        try:
+            POLICY_WRITE(self.workspace,section,str(getattr(self.agent,'provider','') or ''))
+        except Exception as error:
+            self.status.set_text('Не сохранено: '+shorten(error,200));return
+        self.window.destroy()
+
+
+# --- Приложение и проверка --------------------------------------------------
+
+class AgentsApplication(Adw.Application):
+    def __init__(self,root=None,flags=Gio.ApplicationFlags.DEFAULT_FLAGS):
+        super().__init__(application_id=APP_ID,flags=flags)
+        self.root=root
+
+    def do_activate(self):
+        window=self.get_active_window()
+        if window is None:window=AgentsPanel(self,root=self.root)
+        window.present()
+
+
+def save_screenshot(window,path):
+    """Снимок окна в PNG — только для проверки вида на машине."""
+    try:
+        gi.require_version('Graphene','1.0')
+        from gi.repository import Graphene
+        width=window.get_width()
+        height=window.get_height()
+        if width<=0 or height<=0:return 'снимок не сделан: окно ещё не отрисовано'
+        renderer=window.get_renderer()
+        if renderer is None:return 'снимок не сделан: у окна ещё нет рендерера'
+        paintable=Gtk.WidgetPaintable.new(window)
+        snapshot=Gtk.Snapshot()
+        paintable.snapshot(snapshot,width,height)
+        node=snapshot.to_node()
+        if node is None:return 'снимок не сделан: окно ещё не отрисовано'
+        viewport=Graphene.Rect()
+        viewport.init(0,0,width,height)
+        texture=renderer.render_texture(node,viewport)
+        texture.save_to_png(str(path))
+        return f'сохранён {path} ({width}×{height})'
+    except Exception as error:
+        return f'снимок не сделан: {type(error).__name__}: {error}'
+
+
+def smoke_test(root=None,screenshot=None,timeout=60):
+    """Строит окно без пользователя, печатает состояние и выходит."""
+    os.environ.setdefault('GTK_A11Y','none')
+    app=AgentsApplication(root=root,flags=Gio.ApplicationFlags.NON_UNIQUE)
+    state={'ok':False,'reason':'окно не появилось'}
+
+    def poll():
+        window=app.get_active_window()
+        if window is None:return True
+        thread=window.providers_thread
+        if thread is not None and thread.is_alive():return True
+        state.update(ok=True,reason='',core_error=window.core_error,core_ready=window.core_ready,
+                     agents=[str(getattr(agent,'id','')) for agent in window.agents],
+                     sessions=len(window.sessions),messages=len(window.messages),
+                     providers=providers_summary(window.providers),
+                     selected_agent=window.selected_agent_id,selected_session=window.selected_session_id,
+                     ask_enabled=window.ask_button.get_sensitive(),spinner=window.run_spinner.get_spinning(),
+                     feed=window.feed_stack.get_visible_child_name(),
+                     agent_pane=window.agent_stack.get_visible_child_name(),
+                     session_pane=window.session_stack.get_visible_child_name(),
+                     session_placeholder=window.session_placeholder.get_title(),
+                     placeholder=window.feed_placeholder.get_title())
+        if screenshot:state['screenshot']=save_screenshot(window,screenshot)
+        GLib.timeout_add(400,lambda:(app.quit(),False)[1])
+        return False
+
+    GLib.timeout_add(250,poll)
+    GLib.timeout_add_seconds(timeout,lambda:(app.quit(),False)[1])
+    app.run([sys.argv[0]])
+    print(json.dumps(state,ensure_ascii=False))
+    return 0 if state['ok'] else 1
+
+
+def main(argv=None):
+    args=list(sys.argv[1:] if argv is None else argv)
+    root=None
+    screenshot=None
+    for name in ('--root','--screenshot'):
+        if name in args:
+            index=args.index(name)
+            if index+1>=len(args):
+                print(f'{name} требует значение',file=sys.stderr)
+                return 2
+            value=args[index+1]
+            if name=='--root':root=Path(value).expanduser()
+            else:screenshot=value
+            del args[index:index+2]
+    if '--smoke-test' in args:return smoke_test(root=root,screenshot=screenshot)
+    unknown=[item for item in args if item.startswith('-')]
+    if unknown:
+        print('Неизвестный аргумент: '+unknown[0],file=sys.stderr)
+        return 2
+    return AgentsApplication(root=root).run([sys.argv[0]])
+
+
+if __name__=='__main__':
+    raise SystemExit(main())

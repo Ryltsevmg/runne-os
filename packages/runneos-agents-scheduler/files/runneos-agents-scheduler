@@ -1,0 +1,436 @@
+#!/usr/bin/python3
+"""runneos-agents-scheduler — расписания задач агентов и уведомления (v1).
+
+Почему отдельный пакет: ядро `runneos-agents` не запускает ничего само (INTERFACE §1,
+инвариант независимости). Расписания — это как раз «само»: поэтому таймер живёт здесь,
+opt-in (не включён автоматически), а исполнение всё равно идёт через штатный
+`runneos-agents ask` — ход проходит через все ворота агента (доступность, авторизация,
+политика, песочница), как любой другой.
+
+Расписания: `~/.config/runneos/agents-schedules.json` (0600).
+
+    runneos-agents-scheduler add ID AGENT --when 'every 30m|daily 09:30' --prompt '…'
+    runneos-agents-scheduler list [--json]
+    runneos-agents-scheduler remove ID
+    runneos-agents-scheduler enable ID | disable ID
+    runneos-agents-scheduler run            # выполняет дозревшие задачи (вызывает таймер)
+
+Уведомления: `notify-send` (DMS показывает их в сеансе). Режим на задачу: `always`,
+`failure` (по умолчанию), `never`. Нет notify-send или нет сеанса — тихо пропускается.
+
+Проверка без побочных эффектов: `--smoke-test` — JSON: путь конфига, число задач.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
+
+__version__ = "0.1.0"
+
+CLI = "runneos-agents"
+NOTIFY = "notify-send"
+CONFIG_RELATIVE = Path("runneos") / "agents-schedules.json"
+RUN_TIMEOUT = 900
+NOTIFY_MODES = ("always", "failure", "never")
+
+EVERY_RE = re.compile(r"^every (\d{1,3})m$")
+DAILY_RE = re.compile(r"^daily (\d{1,2}):(\d{2})$")
+
+EXIT_OK = 0
+EXIT_ERROR = 1
+EXIT_USAGE = 2
+
+
+# --- чистая логика: проверяется tests/test_scheduler_agents.py ---------------
+
+
+def config_path(xdg_config_home: str | os.PathLike | None = None) -> Path:
+    root = Path(xdg_config_home or os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return root / CONFIG_RELATIVE
+
+
+def load_schedules(path: Path | None = None) -> tuple[list[dict], str]:
+    """(задачи, причина сбоя). Сломанный конфиг — честная причина, а не падение."""
+    target = path or config_path()
+    try:
+        text = target.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return [], ""
+    except OSError as error:
+        return [], f"конфиг не читается: {type(error).__name__}"
+    try:
+        data = json.loads(text)
+    except ValueError as error:
+        return [], f"конфиг не разбирается: {error}"
+    if not isinstance(data, list):
+        return [], "конфиг должен быть списком задач"
+    return [item for item in data if isinstance(item, dict)], ""
+
+
+def save_schedules(schedules: list[dict], path: Path | None = None) -> bool:
+    """Атомарная запись с правами 0600. False — записать не удалось."""
+    target = Path(path or config_path())
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        descriptor, tmp_name = tempfile.mkstemp(dir=str(target.parent), prefix=".schedules-")
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(schedules, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp_name, 0o600)
+        os.replace(tmp_name, target)
+    except OSError:
+        return False
+    return True
+
+
+def parse_when(when: str) -> dict | None:
+    """'every Nm' → {'every_minutes': N}; 'daily HH:MM' → {'daily': 'HH:MM'}; иначе None."""
+    text = str(when or "").strip()
+    every = EVERY_RE.match(text)
+    if every:
+        minutes = int(every.group(1))
+        return {"every_minutes": minutes} if minutes >= 1 else None
+    daily = DAILY_RE.match(text)
+    if daily:
+        hour, minute = int(daily.group(1)), int(daily.group(2))
+        return {"daily": f"{hour:02d}:{minute:02d}"} if hour < 24 and minute < 60 else None
+    return None
+
+
+def is_due(schedule: dict, now: datetime) -> bool:
+    """Дозрела ли задача. Отключённая не дозревает никогда."""
+    if not schedule.get("enabled", True):
+        return False
+    when = schedule.get("when") or {}
+    last_raw = schedule.get("last_run")
+    last = _parse_iso(last_raw)
+    if "every_minutes" in when:
+        if last is None:
+            return True
+        return now - last >= timedelta(minutes=int(when["every_minutes"]))
+    if "daily" in when:
+        hour, minute = str(when["daily"]).split(":")
+        boundary = now.replace(hour=int(hour), minute=int(minute), second=0, microsecond=0)
+        if now < boundary:
+            return False
+        return last is None or last < boundary
+    return False
+
+
+def run_due(
+    *,
+    now: datetime,
+    cli: str | None = None,
+    notifier: str | None = NOTIFY,
+    config: Path | None = None,
+    ask_timeout: float = RUN_TIMEOUT,
+) -> list[dict]:
+    """Выполнить дозревшие задачи; каждая — через штатный `runneos-agents ask`."""
+    cli = cli or CLI
+    schedules, error = load_schedules(config)
+    results: list[dict] = []
+    if error:
+        _notify(notifier, "RunneOS · расписания", f"конфиг не читается: {error}")
+        return [{"ok": False, "error": error}]
+    changed = False
+    for schedule in schedules:
+        if not is_due(schedule, now):
+            continue
+        identifier = str(schedule.get("id") or "?")
+        agent = str(schedule.get("agent") or "")
+        prompt = str(schedule.get("prompt") or "")
+        result = _run_schedule(cli, identifier, agent, prompt, timeout=ask_timeout)
+        schedule["last_run"] = now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        schedule["last_status"] = "ok" if result["ok"] else f"ошибка: {result['error']}"
+        changed = True
+        results.append(result)
+        mode = str(schedule.get("notify") or "failure")
+        if mode not in NOTIFY_MODES:
+            mode = "failure"
+        if notifier and (mode == "always" or (mode == "failure" and not result["ok"])):
+            agent_label = agent or "?"
+            body = result["text"] if result["ok"] else f"ошибка: {result['error']}"
+            _notify(notifier, f"RunneOS · агент {agent_label}", body)
+    if changed and not save_schedules(schedules, config):
+        _notify(notifier, "RunneOS · расписания", "не удалось записать конфиг после прогона")
+    return results
+
+
+def _run_schedule(cli: str, identifier: str, agent: str, prompt: str, timeout: float) -> dict:
+    """Один ход по расписанию: `[по расписанию ID] PROMPT` через штатный CLI."""
+    if not agent or not prompt:
+        return {"id": identifier, "ok": False, "text": "", "error": "в задаче нет агента или текста"}
+    try:
+        done = subprocess.run(
+            [cli, "ask", agent, f"[по расписанию {identifier}] {prompt}", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except FileNotFoundError:
+        return {"id": identifier, "ok": False, "text": "", "error": f"{cli} не найден"}
+    except subprocess.TimeoutExpired:
+        return {"id": identifier, "ok": False, "text": "", "error": f"таймаут {timeout:g} с"}
+    except OSError as error:
+        return {"id": identifier, "ok": False, "text": "", "error": f"{type(error).__name__}"}
+    try:
+        payload = json.loads((done.stdout or "").strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        status = f"код {done.returncode}" if done.returncode else "нет JSON"
+        return {"id": identifier, "ok": False, "text": "", "error": status}
+    return {
+        "id": identifier,
+        "ok": bool(payload.get("ok")),
+        "text": str(payload.get("text") or "")[:400],
+        "error": str(payload.get("error") or ""),
+    }
+
+
+def _notify(notifier: str, title: str, body: str) -> None:
+    """Уведомление сеансу; нет notify-send или нет DISPLAY — тихо пропускаем."""
+    if not notifier:
+        return
+    try:
+        subprocess.run(
+            [notifier, "-a", "RunneOS", str(title), str(body)[:300]],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def _parse_iso(text: object) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+
+
+def validate_agent(cli: str, agent_id: str) -> str | None:
+    """id агента известен ядру? Возвращает причину, если нет (или проверить не вышло)."""
+    if not agent_id:
+        return "агент не указан"
+    try:
+        done = subprocess.run(
+            [cli, "agent", "list", "--json"], capture_output=True, text=True, timeout=30, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "не удалось проверить агента (CLI недоступен) — задача сохранена как есть"
+    for line in (done.stdout or "").splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("id") == agent_id:
+            return None
+    return f"агент {agent_id} не найден (runneos-agents agent list)"
+
+
+def smoke_payload() -> dict:
+    schedules, error = load_schedules()
+    return {
+        "version": __version__,
+        "ok": not error,
+        "error": error,
+        "config": str(config_path()),
+        "schedules": len(schedules),
+        "enabled": sum(1 for item in schedules if item.get("enabled", True)),
+    }
+
+
+# --- CLI ---------------------------------------------------------------------
+
+
+def main(argv: list[str] | None = None) -> int:
+    rest = list(sys.argv[1:] if argv is None else argv)
+    if "--smoke-test" in rest:
+        # До сабкоманд: проверка не должна требовать выбор команды.
+        payload = smoke_payload()
+        print(json.dumps(payload, ensure_ascii=False))
+        return EXIT_OK if payload["ok"] else EXIT_ERROR
+
+    parser = argparse.ArgumentParser(
+        prog="runneos-agents-scheduler",
+        description="Расписания задач агентов RunneOS и уведомления (opt-in таймер).",
+    )
+    parser.add_argument("--version", action="version", version=f"runneos-agents-scheduler {__version__}")
+    parser.add_argument("--smoke-test", action="store_true", help="JSON-снимок конфига")
+    parser.add_argument("--config", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--cli", default=CLI, help=argparse.SUPPRESS)
+    parser.add_argument("--no-notify", action="store_true", help=argparse.SUPPRESS)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    add = sub.add_parser("add", help="добавить задачу")
+    add.add_argument("id", help="имя задачи (уникальное)")
+    add.add_argument("agent", help="агент-исполнитель")
+    add.add_argument("--when", required=True, help="'every Nm' или 'daily ЧЧ:ММ'")
+    add.add_argument("--prompt", required=True, help="текст задачи")
+    add.add_argument("--notify", default="failure", choices=NOTIFY_MODES)
+
+    list_parser = sub.add_parser("list", help="список задач")
+    list_parser.add_argument("--json", action="store_true", dest="json_output")
+    remove = sub.add_parser("remove", help="удалить задачу")
+    remove.add_argument("id")
+    enable = sub.add_parser("enable", help="включить задачу")
+    enable.add_argument("id")
+    disable = sub.add_parser("disable", help="выключить задачу")
+    disable.add_argument("id")
+    run = sub.add_parser("run", help="выполнить дозревшие задачи (вызывает таймер)")
+    run.add_argument("--json", action="store_true", dest="json_output")
+
+    args = parser.parse_args(argv)
+    path = Path(args.config) if args.config else None
+
+    if args.smoke_test:
+        payload = smoke_payload()
+        print(json.dumps(payload, ensure_ascii=False))
+        return EXIT_OK if payload["ok"] else EXIT_ERROR
+
+    if args.command == "add":
+        return _cmd_add(args, path)
+    if args.command == "list":
+        return _cmd_list(args, path)
+    if args.command == "remove":
+        return _cmd_remove(args, path)
+    if args.command == "enable" or args.command == "disable":
+        return _cmd_toggle(args, path)
+    if args.command == "run":
+        notifier = "" if args.no_notify else NOTIFY
+        results = run_due(now=datetime.now().astimezone(), cli=args.cli, notifier=notifier, config=path)
+        if args.json_output:
+            print(json.dumps(results, ensure_ascii=False))
+        elif not results:
+            print("Дозревших задач нет.")
+        else:
+            for item in results:
+                mark = "ок" if item["ok"] else "ошибка"
+                detail = item["text"] or item["error"]
+                print(f"[{mark}] {item['id']}: {detail[:200]}")
+        return EXIT_OK if all(item["ok"] for item in results) else EXIT_ERROR
+    return EXIT_USAGE
+
+
+def _cmd_add(args, path: Path | None) -> int:
+    when = parse_when(args.when)
+    if when is None:
+        print(f"ошибка: --when понимает 'every Nm' и 'daily ЧЧ:ММ', а не {args.when!r}", file=sys.stderr)
+        return EXIT_USAGE
+    schedules, error = load_schedules(path)
+    if error:
+        print(f"ошибка: {error}", file=sys.stderr)
+        return EXIT_ERROR
+    if any(item.get("id") == args.id for item in schedules):
+        print(f"ошибка: задача {args.id!r} уже есть", file=sys.stderr)
+        return EXIT_ERROR
+    warning = validate_agent(args.cli, args.agent)
+    schedules.append(
+        {
+            "id": args.id,
+            "agent": args.agent,
+            "when": when,
+            "prompt": args.prompt,
+            "notify": args.notify,
+            "enabled": True,
+            "last_run": None,
+            "last_status": None,
+        }
+    )
+    if not save_schedules(schedules, path):
+        print("ошибка: конфиг не записан", file=sys.stderr)
+        return EXIT_ERROR
+    print(f"Задача {args.id!r} добавлена ({args.when}). Текста run для исполнения ждёт таймер.")
+    if warning:
+        print(f"замечание: {warning}", file=sys.stderr)
+    return EXIT_OK
+
+
+def _cmd_list(args, path: Path | None) -> int:
+    schedules, error = load_schedules(path)
+    if error:
+        print(f"ошибка: {error}", file=sys.stderr)
+        return EXIT_ERROR
+    rows = [
+        {
+            "id": item.get("id"),
+            "agent": item.get("agent"),
+            "when": item.get("when"),
+            "enabled": bool(item.get("enabled", True)),
+            "notify": item.get("notify") or "failure",
+            "prompt": item.get("prompt"),
+            "last_run": item.get("last_run"),
+            "last_status": item.get("last_status"),
+        }
+        for item in schedules
+    ]
+    if args.json_output:
+        for row in rows:
+            print(json.dumps(row, ensure_ascii=False))
+        return EXIT_OK
+    if not rows:
+        print("Задач нет. Добавить: runneos-agents-scheduler add ID AGENT --when 'every 30m' --prompt '…'")
+        print("Таймер включается отдельно: systemctl --user enable --now runneos-agents-scheduler.timer")
+        return EXIT_OK
+    for row in rows:
+        state = "вкл " if row["enabled"] else "выкл"
+        status = row["last_status"] or "не запускалась"
+        print(f"{row['id']:<20} [{state}] {row['agent']} {json.dumps(row['when'], ensure_ascii=False)}"
+              f" · {status}")
+    return EXIT_OK
+
+
+def _cmd_remove(args, path: Path | None) -> int:
+    schedules, error = load_schedules(path)
+    if error:
+        print(f"ошибка: {error}", file=sys.stderr)
+        return EXIT_ERROR
+    kept = [item for item in schedules if item.get("id") != args.id]
+    if len(kept) == len(schedules):
+        print(f"ошибка: задача {args.id!r} не найдена", file=sys.stderr)
+        return EXIT_ERROR
+    if not save_schedules(kept, path):
+        print("ошибка: конфиг не записан", file=sys.stderr)
+        return EXIT_ERROR
+    print(f"Задача {args.id!r} удалена.")
+    return EXIT_OK
+
+
+def _cmd_toggle(args, path: Path | None) -> int:
+    schedules, error = load_schedules(path)
+    if error:
+        print(f"ошибка: {error}", file=sys.stderr)
+        return EXIT_ERROR
+    found = False
+    for item in schedules:
+        if item.get("id") == args.id:
+            item["enabled"] = args.command == "enable"
+            found = True
+    if not found:
+        print(f"ошибка: задача {args.id!r} не найдена", file=sys.stderr)
+        return EXIT_ERROR
+    if not save_schedules(schedules, path):
+        print("ошибка: конфиг не записан", file=sys.stderr)
+        return EXIT_ERROR
+    print(f"Задача {args.id!r}: {args.command}d.")
+    return EXIT_OK
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("\nпрервано пользователем", file=sys.stderr)
+        sys.exit(EXIT_ERROR)

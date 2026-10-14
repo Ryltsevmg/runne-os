@@ -1,0 +1,30 @@
+# Maintainer: RunneOS <https://github.com/Ryltsevmg/runne-os>
+# Pinned AI provider CLIs used by runneos-agents and runneos-ai-usage.
+# Codex: Apache-2.0, official GitHub release (static musl binary).
+# OpenCode: MIT, official npm platform package @opencode/cli-linux-x64.
+# Update procedure and provenance: README.md next to this file.
+pkgname=runneos-ai-providers
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Pinned AI provider CLIs (Codex, OpenCode) for RunneOS agents"
+arch=('x86_64')
+url='https://github.com/Ryltsevmg/runne-os'
+license=('Apache-2.0' 'MIT')
+depends=('glibc')
+options=('!strip')
+source=(
+  "codex-0.162.1.tar.gz::https://github.com/openai/codex/releases/download/rust-v0.162.1/codex-x86_64-unknown-linux-musl.tar.gz"
+  "opencode-2.0.26.tgz::https://registry.npmjs.org/@opencode/cli-linux-x64/-/cli-linux-x64-2.0.26.tgz"
+)
+sha256sums=('86f268d81b898f3e144c5ecff2ad2fda2c5802e042d6195b72538fe0fa125057'
+            '0a116e033a02804741d4644337d012bdf5a24aac33a34c0c96534d2d53961119')
+
+check() {
+  "$srcdir/codex-x86_64-unknown-linux-musl" --version | grep -q 'codex-cli 0.162.1'
+  "$srcdir/package/bin/opencode" --version | grep -q 'opencode v2.0.26'
+}
+
+package() {
+  install -Dm755 "$srcdir/codex-x86_64-unknown-linux-musl" "$pkgdir/usr/bin/codex"
+  install -Dm755 "$srcdir/package/bin/opencode" "$pkgdir/usr/bin/opencode"
+}

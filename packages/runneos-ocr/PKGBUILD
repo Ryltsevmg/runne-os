@@ -1,0 +1,14 @@
+pkgname=runneos-ocr
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Recognize text from a selected screen region for RunneOS (grim+slurp+tesseract, result to clipboard)'
+arch=('any')
+license=('MIT')
+depends=('grim' 'slurp' 'tesseract' 'tesseract-data-rus' 'tesseract-data-eng' 'wl-clipboard' 'libnotify' 'python')
+check() {
+  PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s "$startdir/../../tests" -p test_ocr.py -v
+}
+package() {
+  install -Dm755 "$startdir/files/ocr.py" "$pkgdir/usr/bin/runneos-ocr"
+  install -Dm644 "$startdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

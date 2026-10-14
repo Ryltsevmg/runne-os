@@ -1,0 +1,13 @@
+{
+  "id": "runneosFocusedApp",
+  "name": "Активное окно RunneOS",
+  "description": "Заголовок активного окна: левый клик — фокус приложения, правый — сведения и действия",
+  "version": "0.1.0",
+  "author": "RunneOS",
+  "icon": "web_asset",
+  "type": "widget",
+  "capabilities": ["dankbar-widget"],
+  "component": "./RunneosFocusedApp.qml",
+  "permissions": ["process"],
+  "requires_dms": ">=1.6.3"
+}

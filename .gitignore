@@ -1,0 +1,16 @@
+out/
+work/
+packages/*/pkg/
+packages/*/src/
+packages/*/*.pkg.tar.zst
+packages/*/*.tar.gz
+packages/*/build.log
+__pycache__/
+installer/cmd_history.txt
+installer/install.log
+iso/airootfs/usr/share/runneos/installer/
+iso/airootfs/runneos-repo/
+iso/airootfs/etc/pacman.conf
+work.*/
+.zcode/
+.zcodeignore

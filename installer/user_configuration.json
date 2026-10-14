@@ -1,0 +1,97 @@
+{
+  "archinstall-language": "English",
+  "audio_config": {
+    "audio": "pipewire"
+  },
+  "bootloader_config": {
+    "bootloader": "Limine",
+    "removable": false,
+    "uki": false
+  },
+  "debug": false,
+  "hostname": "runneos",
+  "kernels": [
+    "linux"
+  ],
+  "locale_config": {
+    "kb_layout": "us",
+    "sys_enc": "UTF-8",
+    "sys_lang": "en_US"
+  },
+  "network_config": {
+    "type": "nm"
+  },
+  "ntp": true,
+  "packages": [
+    "niri",
+    "dms-shell",
+    "quickshell",
+    "ghostty",
+    "xwayland-satellite",
+    "xdg-desktop-portal",
+    "xdg-desktop-portal-gtk",
+    "xdg-desktop-portal-gnome",
+    "gnome-keyring",
+    "seahorse",
+    "bitwarden",
+    "pipewire",
+    "pipewire-pulse",
+    "pipewire-alsa",
+    "wireplumber",
+    "polkit",
+    "wtype",
+    "nautilus",
+    "sushi",
+    "tmux",
+    "neovim",
+    "btop",
+    "inter-font",
+    "ttf-jetbrains-mono",
+    "btrfs-progs",
+    "snapper",
+    "snap-pac",
+    "gpu-screen-recorder",
+    "ffmpeg",
+    "libxkbcommon",
+    "xkeyboard-config",
+    "sddm",
+    "firefox",
+    "runneos-desktop",
+    "runneos-config",
+    "runneos-keyring",
+    "runneos-theme",
+    "runneos-tools",
+    "runneos-software",
+    "runneos-ai-usage",
+    "runneos-launcher",
+    "runneos-whitesur-gtk",
+    "runneos-whitesur-icons",
+    "runneos-whitesur-cursors",
+    "runneos-agents",
+    "runneos-agents-firstboot",
+    "runneos-agents-scheduler",
+    "runneos-ai-providers",
+    "runneos-ocr",
+    "bluez",
+    "bluez-utils"
+  ],
+  "profile_config": {
+    "gfx_driver": "All open-source",
+    "greeter": "sddm",
+    "profile": {
+      "main": "Minimal"
+    }
+  },
+  "services": [
+    "bluetooth"
+  ],
+  "silent": false,
+  "swap": {
+    "algorithm": "zstd",
+    "enabled": true
+  },
+  "timezone": "Europe/Moscow",
+  "custom_commands": [
+    "sh -c 'runneos-post-install --apply || echo ВНИМАНИЕ: постустановочный шаг нашёл проблемы, отчёт выше — установка продолжена'"
+  ]
+}

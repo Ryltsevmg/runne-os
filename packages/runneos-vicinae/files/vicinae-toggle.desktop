@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Vicinae Toggle
+Comment=Show/hide the Vicinae launcher
+Exec=vicinae toggle
+Icon=vicinae
+NoDisplay=true

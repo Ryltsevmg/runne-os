@@ -1,0 +1,18 @@
+# Служба очереди задач агентов RunneOS (INTERFACE v1.10).
+# Пакет ставит юниты, но НЕ включает их: инвариант ядра «ничего не запускает
+# само» распространяется и на службу. Включение — осознанный шаг владельца:
+#   systemctl --user enable --now runneos-agents-service.service
+# Без службы задачи из очереди просто ждут в базе.
+[Unit]
+Description=RunneOS Agents: служба очереди задач
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/runneos-agents-service
+Restart=on-failure
+RestartSec=5
+# Ход задачи может идти долго (таймауты провайдера внутри).
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

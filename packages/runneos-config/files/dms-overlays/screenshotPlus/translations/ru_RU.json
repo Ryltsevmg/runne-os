@@ -1,0 +1,128 @@
+{
+  "Toolbar": {
+    "Toolbar": "Панель инструментов"
+  },
+  "Default style": {
+    "Default style": "Стиль по умолчанию"
+  },
+  "Color": {
+    "Color": "Цвет"
+  },
+  "Size": {
+    "Size": "Размер"
+  },
+  "Output": {
+    "Output": "Вывод"
+  },
+  "Copy to clipboard": {
+    "Copy to clipboard": "Скопировать в буфер обмена"
+  },
+  "Save to file": {
+    "Save to file": "Сохранить в файл"
+  },
+  "Pin to screen": {
+    "Pin to screen": "Закрепить на экране"
+  },
+  "Save directory": {
+    "Save directory": "Каталог сохранения"
+  },
+  "File name": {
+    "File name": "Имя файла"
+  },
+  "date(1) format without the extension, e.g. screenshot_%Y-%m-%d_%H-%M-%S": {
+    "date(1) format without the extension, e.g. screenshot_%Y-%m-%d_%H-%M-%S": "Формат date(1) без расширения, например screenshot_%Y-%m-%d_%H-%M-%S"
+  },
+  "Notify when done": {
+    "Notify when done": "Сообщать о завершении"
+  },
+  "Backend": {
+    "Backend": "Механизм захвата"
+  },
+  "Select": {
+    "Select": "Выбор"
+  },
+  "Rectangle": {
+    "Rectangle": "Прямоугольник"
+  },
+  "Ellipse": {
+    "Ellipse": "Эллипс"
+  },
+  "Line": {
+    "Line": "Линия"
+  },
+  "Arrow": {
+    "Arrow": "Стрелка"
+  },
+  "Pen": {
+    "Pen": "Перо"
+  },
+  "Highlighter": {
+    "Highlighter": "Маркер"
+  },
+  "Text": {
+    "Text": "Текст"
+  },
+  "Mosaic": {
+    "Mosaic": "Мозаика"
+  },
+  "Number": {
+    "Number": "Нумерация"
+  },
+  "Color / size": {
+    "Color / size": "Цвет / размер"
+  },
+  "Undo (Ctrl+Z)": {
+    "Undo (Ctrl+Z)": "Отменить (Ctrl+Z)"
+  },
+  "Redo (Ctrl+Shift+Z)": {
+    "Redo (Ctrl+Shift+Z)": "Повторить (Ctrl+Shift+Z)"
+  },
+  "Save to file (Ctrl+S)": {
+    "Save to file (Ctrl+S)": "Сохранить в файл (Ctrl+S)"
+  },
+  "Copy to clipboard (Enter / Space)": {
+    "Copy to clipboard (Enter / Space)": "Скопировать в буфер обмена (Enter / Space)"
+  },
+  "Cancel (Esc)": {
+    "Cancel (Esc)": "Отмена (Esc)"
+  },
+  "Pin to screen (Ctrl+P)": {
+    "Pin to screen (Ctrl+P)": "Закрепить на экране (Ctrl+P)"
+  },
+  "Close (Esc)": {
+    "Close (Esc)": "Закрыть (Esc)"
+  },
+  "Custom color": {
+    "Custom color": "Свой цвет"
+  },
+  "Drag to select an area  ·  Esc to cancel": {
+    "Drag to select an area  ·  Esc to cancel": "Растяните область выделения  ·  Esc — отмена"
+  },
+  "Annotation color": {
+    "Annotation color": "Цвет аннотаций"
+  },
+  "Saved and copied to clipboard": {
+    "Saved and copied to clipboard": "Сохранено и скопировано в буфер обмена"
+  },
+  "Saved": {
+    "Saved": "Сохранено"
+  },
+  "Copied to clipboard": {
+    "Copied to clipboard": "Скопировано в буфер обмена"
+  },
+  "Could not save to": {
+    "Could not save to": "Не удалось сохранить в"
+  },
+  "cli grabs the screen with dms screenshot and works with any Quickshell. screencopy shows the frame about three times sooner but crashes current stock Quickshell when the overlay closes (quickshell#1094, fix pending); use it only with a Quickshell that includes the fix.": {
+    "cli grabs the screen with dms screenshot and works with any Quickshell. screencopy shows the frame about three times sooner but crashes current stock Quickshell when the overlay closes (quickshell#1094, fix pending); use it only with a Quickshell that includes the fix.": "Режим cli захватывает экран через dms screenshot и работает с любым Quickshell. Режим screencopy показывает кадр примерно втрое быстрее, но валит штатный Quickshell при закрытии области захвата (quickshell#1094, исправление готовится); используйте его только с Quickshell, куда исправление уже вошло."
+  },
+  "Clear all annotations": {
+    "Clear all annotations": "Очистить все аннотации"
+  },
+  "F  whole screen  ·  < >  previous regions": {
+    "F  whole screen  ·  < >  previous regions": "F  весь экран  ·  < >  предыдущие области"
+  },
+  "F  whole screen": {
+    "F  whole screen": "F  весь экран"
+  }
+}

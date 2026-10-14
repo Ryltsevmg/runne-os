@@ -1,0 +1,52 @@
+pkgname=runneos-config
+pkgver=0.0.12
+pkgrel=13
+pkgdesc="Runne OS system configuration"
+arch=('any')
+license=('MIT')
+# dconf carries the interface defaults below; the WhiteSur packages provide the
+# icon and cursor themes those defaults name, so they are hard dependencies and
+# the references cannot dangle.
+depends=('python' 'xdg-utils' 'runneos-theme' 'dconf'
+         'runneos-whitesur-icons' 'runneos-whitesur-cursors')
+install="$pkgname.install"
+source=('os-release')
+sha256sums=('SKIP')
+package() {
+  install -Dm644 "$srcdir/os-release" "$pkgdir/usr/lib/runneos/os-release"
+  install -Dm644 "$startdir/files/ghostty-config" "$pkgdir/etc/skel/.config/ghostty/config"
+  install -Dm755 "$startdir/../../scripts/runneos-terminal.py" "$pkgdir/usr/bin/runneos-terminal"
+  install -Dm644 "$startdir/files/runneos-terminal.desktop" "$pkgdir/usr/share/applications/runneos-terminal.desktop"
+  install -Dm644 "$startdir/files/90-runneos-terminal.conf" "$pkgdir/etc/skel/.config/environment.d/90-runneos-terminal.conf"
+  install -Dm644 "$startdir/files/xdg-terminals.list" "$pkgdir/etc/xdg/xdg-terminals.list"
+  install -Dm644 "$startdir/files/niri-config.kdl" "$pkgdir/etc/skel/.config/niri/config.kdl"
+  install -Dm644 "$startdir/files/niri-bindings.kdl" "$pkgdir/etc/skel/.config/niri/niri-bindings.kdl"
+  install -Dm644 "$startdir/files/dms-settings.json" "$pkgdir/etc/skel/.config/DankMaterialShell/settings.json"
+  install -Dm644 "$startdir/files/dms-plugins.lock.json" "$pkgdir/usr/share/runneos/dms/dms-plugins.lock.json"
+  install -Dm644 "$startdir/files/dms-plugin-settings.json" "$pkgdir/usr/share/runneos/dms/dms-plugin-settings.json"
+  # Русификация DMS-плагина Screenshot+: русский каталог переводов, установщик
+  # (runneos-install-dms-plugins) кладёт его поверх закреплённого upstream.
+  install -Dm644 "$startdir/files/dms-overlays/screenshotPlus/translations/ru_RU.json" \
+    "$pkgdir/usr/share/runneos/dms/dms-overlays/screenshotPlus/translations/ru_RU.json"
+  install -Dm644 "$startdir/files/dms-overlays/screenshotPlus/translations/ru.json" \
+    "$pkgdir/usr/share/runneos/dms/dms-overlays/screenshotPlus/translations/ru.json"
+  install -Dm644 "$startdir/files/dconf-profile-user" "$pkgdir/etc/dconf/profile/user"
+  install -Dm644 "$startdir/files/dconf-00-runneos-interface" "$pkgdir/etc/dconf/db/local.d/00-runneos-interface"
+  install -Dm755 "$startdir/../../scripts/install-dms-plugins.py" "$pkgdir/usr/bin/runneos-install-dms-plugins"
+  install -Dm755 "$startdir/files/runneos-focused-app-install" "$pkgdir/usr/bin/runneos-focused-app-install"
+  # Свой DMS-плагин: виджет активного окна (левый клик — фокус, правый — сведения).
+  # DMS читает плагины только из ~/.config/DankMaterialShell/plugins, поэтому
+  # источник ставится в /usr/share/runneos/dms, а копирует его установщик.
+  install -Dm644 "$startdir/files/dms-plugins/RunneosFocusedApp/plugin.json" \
+    "$pkgdir/usr/share/runneos/dms/RunneosFocusedApp/plugin.json"
+  install -Dm644 "$startdir/files/dms-plugins/RunneosFocusedApp/RunneosFocusedApp.qml" \
+    "$pkgdir/usr/share/runneos/dms/RunneosFocusedApp/RunneosFocusedApp.qml"
+  install -Dm755 "$startdir/files/runneos-post-install" "$pkgdir/usr/bin/runneos-post-install"
+  # snapper cannot create the root configuration from the installer chroot; this
+  # unit does it on the first boot of the installed system.
+  install -Dm644 "$startdir/files/runneos-snapper-firstboot.service" \
+    "$pkgdir/usr/lib/systemd/system/runneos-snapper-firstboot.service"
+  install -d "$pkgdir/etc/systemd/user/graphical-session.target.wants"
+  ln -s /usr/lib/systemd/user/dms.service "$pkgdir/etc/systemd/user/graphical-session.target.wants/dms.service"
+  install -Dm644 "$startdir/files/dms-bluetooth.conf" "$pkgdir/etc/systemd/user/dms.service.d/bluetooth.conf"
+}

@@ -1,0 +1,91 @@
+# Maintainer: RunneOS <https://github.com/Ryltsevmg/runne-os>
+pkgname=runneos-whitesur-icons
+_repo=WhiteSur-icon-theme
+_commit=73d8040da51a9ed74e47c7366e7e9ff437601a5c
+pkgver=0.git.73d8040
+pkgrel=2
+pkgdesc="WhiteSur icon theme for Runne OS"
+arch=('any')
+url="https://github.com/vinceliuice/WhiteSur-icon-theme"
+license=('GPL-3.0-or-later')
+depends=('hicolor-icon-theme')
+options=('!strip')
+source=("${_repo}-${_commit}.tar.gz::https://github.com/vinceliuice/${_repo}/archive/${_commit}.tar.gz")
+sha256sums=('96661649071d8a9664b40d42abea75286175234473106156e9a4b25f54e6cb0c')
+
+# Default color, variants '' -light -dark.
+package() {
+  local S="${srcdir}/${_repo}-${_commit}"
+  local dest="${pkgdir}/usr/share/icons"
+  local name=WhiteSur T
+  install -d "$dest"
+
+  # base
+  T="$dest/$name"
+  install -d "$T/status"
+  cp "$S/src/index.theme" "$T/"
+  cp -r "$S"/src/{actions,animations,apps,categories,devices,emotes,emblems,mimes,places,preferences} "$T/"
+  cp -r "$S"/src/status/{16,22,24,32,symbolic} "$T/status/"
+  rm -f "$T"/places/scalable/user-trash{,-full}-dark.svg
+  cp -r "$S"/links/{actions,apps,categories,devices,emotes,emblems,mimes,places,status,preferences} "$T/"
+
+  # light
+  T="$dest/$name-light"
+  install -d "$T/status"
+  cp "$S/src/index.theme" "$T/"; sed -i "s/WhiteSur/$name-light/g" "$T/index.theme"
+  cp -r "$S"/src/status/{16,22,24,32} "$T/status/"
+  sed -i "s/#f2f2f2/#363636/g" "$T"/status/{16,22,24,32}/*
+  cp -r "$S"/links/status/{16,22,24,32} "$T/status/"
+  local x
+  for x in actions animations apps categories devices emotes emblems mimes places preferences; do
+    ln -s ../$name/$x "$T/$x"
+  done
+  ln -s ../../$name/status/symbolic "$T/status/symbolic"
+
+  # dark
+  T="$dest/$name-dark"
+  install -d "$T"/{apps,categories,emblems,devices,mimes,places,status}
+  cp "$S/src/index.theme" "$T/"; sed -i "s/WhiteSur/$name-dark/g" "$T/index.theme"
+  cp -r "$S"/src/actions "$T/"
+  cp -r "$S"/src/apps/{16,22,32,symbolic} "$T/apps/"
+  cp -r "$S"/src/categories/{22,symbolic} "$T/categories/"
+  cp -r "$S"/src/emblems/symbolic "$T/emblems/"
+  cp -r "$S"/src/mimes/symbolic "$T/mimes/"
+  cp -r "$S"/src/devices/{16,22,24,32,symbolic} "$T/devices/"
+  cp -r "$S"/src/places/{16,22,24,scalable,symbolic} "$T/places/"
+  cp -r "$S"/src/status/symbolic "$T/status/"
+  mv -f "$T"/places/scalable/user-trash-dark.svg "$T"/places/scalable/user-trash.svg
+  mv -f "$T"/places/scalable/user-trash-full-dark.svg "$T"/places/scalable/user-trash-full.svg
+  sed -i "s/#363636/#dedede/g" "$T"/{actions,devices,places}/{16,22,24}/*.svg
+  sed -i "s/#363636/#dedede/g" "$T"/apps/{16,22,32}/*.svg
+  sed -i "s/#363636/#dedede/g" "$T"/categories/22/*.svg
+  sed -i "s/#363636/#dedede/g" "$T"/{actions,devices}/32/*.svg
+  sed -i "s/#363636/#dedede/g" "$T"/{actions,apps,categories,emblems,devices,mimes,places,status}/symbolic/*.svg
+  cp -r "$S"/links/actions/{16,22,24,32,symbolic} "$T/actions/"
+  cp -r "$S"/links/devices/{16,22,24,32,symbolic} "$T/devices/"
+  cp -r "$S"/links/places/{16,22,24,scalable,symbolic} "$T/places/"
+  cp -r "$S"/links/apps/{16,22,32,symbolic} "$T/apps/"
+  cp -r "$S"/links/categories/{22,symbolic} "$T/categories/"
+  cp -r "$S"/links/emblems/symbolic "$T/emblems/"
+  cp -r "$S"/links/mimes/symbolic "$T/mimes/"
+  cp -r "$S"/links/status/symbolic "$T/status/"
+  ln -s ../$name/animations "$T/animations"
+  ln -s ../$name/emotes "$T/emotes"
+  ln -s ../$name/preferences "$T/preferences"
+  ln -s ../../$name/categories/32 "$T/categories/32"
+  for x in emblems/16 emblems/22 emblems/24 mimes/16 mimes/22 mimes/scalable apps/scalable devices/scalable status/16 status/22 status/24 status/32; do
+    ln -s ../../$name/$x "$T/$x"
+  done
+
+  for T in "$dest"/$name "$dest"/$name-light "$dest"/$name-dark; do
+    for x in actions animations apps categories devices emotes emblems mimes places preferences status; do
+      ln -sfn $x "$T/$x@2x"
+    done
+  done
+  # Drop assets specific to the removed desktop and its applications.
+  find "$dest" \( -iname '*kde*' -o -iname '*plasma*' -o -iname '*kwin*' \
+    -o -iname '*konsole*' -o -iname '*dolphin*' -o -iname '*krunner*' \
+    -o -iname '*klipper*' -o -iname '*baloo*' -o -iname '*kwallet*' \
+    -o -iname '*spectacle*' \) -delete
+  install -Dm644 "$S"/COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
+}

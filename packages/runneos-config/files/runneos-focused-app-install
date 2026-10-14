@@ -1,0 +1,79 @@
+#!/bin/bash
+# Установить виджет активного окна RunneOS в активный DMS и поставить его в панель
+# вместо встроенного focusedWindow. Идемпотентен: повторный запуск обновляет файлы
+# плагина и повторяет раскладку без дублей.
+#
+# Источник плагина: /usr/share/runneos/dms/RunneosFocusedApp (пакет runneos-config),
+# при запуске из репозитория — packages/runneos-config/files/dms-plugins/RunneosFocusedApp.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+repo_src="$here/../packages/runneos-config/files/dms-plugins/RunneosFocusedApp"
+src=${RUNNEOS_PLUGIN_SRC:-}
+if [[ -z $src ]]; then
+	if [[ -d /usr/share/runneos/dms/RunneosFocusedApp ]]; then
+		src=/usr/share/runneos/dms/RunneosFocusedApp
+	elif [[ -d $repo_src ]]; then
+		src=$repo_src
+	else
+		echo "источник плагина не найден" >&2
+		exit 1
+	fi
+fi
+
+cfg_dir=${XDG_CONFIG_HOME:-$HOME/.config}/DankMaterialShell
+dst=$cfg_dir/plugins/runneosFocusedApp
+backup_dir=${XDG_STATE_HOME:-$HOME/.local/state}/runneos/backups/focused-app-$(date -u +%Y%m%dT%H%M%SZ)
+
+[[ -f $src/plugin.json && -f $src/RunneosFocusedApp.qml ]] || { echo "в $src нет plugin.json/RunneosFocusedApp.qml" >&2; exit 1; }
+mkdir -p "$backup_dir"
+[[ -f $cfg_dir/settings.json ]] && cp -a "$cfg_dir/settings.json" "$backup_dir/"
+[[ -f $cfg_dir/plugin_settings.json ]] && cp -a "$cfg_dir/plugin_settings.json" "$backup_dir/" || :
+
+mkdir -p "$cfg_dir/plugins"
+rm -rf "$dst"
+cp -a "$src" "$dst"
+
+python3 - "$cfg_dir/settings.json" "$cfg_dir/plugin_settings.json" <<'PY'
+import json, pathlib, sys
+
+settings_path, plugins_path = (pathlib.Path(p) for p in sys.argv[1:])
+
+s = json.loads(settings_path.read_text()) if settings_path.exists() else {}
+changed = False
+for bar in s.get('barConfigs', []):
+    widgets = bar.get('leftWidgets')
+    if not isinstance(widgets, list):
+        continue
+    if 'runneosFocusedApp' in widgets:
+        if 'focusedWindow' in widgets:
+            widgets[:] = [w for w in widgets if w != 'focusedWindow']
+            changed = True
+        continue
+    if 'focusedWindow' in widgets:
+        widgets[widgets.index('focusedWindow')] = 'runneosFocusedApp'
+    else:
+        widgets.insert(0, 'runneosFocusedApp')
+    changed = True
+if changed:
+    settings_path.write_text(json.dumps(s, ensure_ascii=False, indent=2) + '\n')
+    print('панель: focusedWindow заменён на runneosFocusedApp')
+else:
+    print('панель: правки не требовались')
+
+p = json.loads(plugins_path.read_text()) if plugins_path.exists() else {}
+if p.get('runneosFocusedApp', {}).get('enabled') is not True:
+    p.setdefault('runneosFocusedApp', {})['enabled'] = True
+    plugins_path.write_text(json.dumps(p, ensure_ascii=False, indent=2) + '\n')
+    print('плагин: включён в plugin_settings.json')
+else:
+    print('плагин: уже включён')
+PY
+
+echo "источник: $src → $dst"
+echo "бэкап настроек: $backup_dir"
+if [[ ${DMS_RUNNING:-1} == 1 ]]; then
+	echo 'применение в живом сеансе:'
+	echo "  dms ipc call plugins enable runneosFocusedApp && dms ipc call settings reload"
+	echo '  (или перезапустить dms.service — правка файлов делается при остановленном DMS)'
+fi

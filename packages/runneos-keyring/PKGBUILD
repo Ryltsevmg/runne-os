@@ -1,0 +1,22 @@
+pkgname=runneos-keyring
+pkgver=20261013
+pkgrel=1
+pkgdesc='RunneOS package signing key for pacman'
+arch=('any')
+license=('MIT')
+depends=('pacman')
+install=runneos-keyring.install
+check() {
+  local fpr='3174AC28EBBBD790813B4FBC00B5A884A68486E9'
+  gpg --show-keys "$startdir/files/runneos.gpg" | grep -q "$fpr"
+  gpg --show-keys "$startdir/files/runneos.asc" | grep -q "$fpr"
+  grep -qx "$fpr" "$startdir/files/runneos-trusted"
+  PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s "$startdir/../../tests" -p test_pkg_keyring.py -v
+}
+package() {
+  install -Dm644 "$startdir/files/runneos.gpg" "$pkgdir/usr/share/pacman/keyrings/runneos.gpg"
+  install -Dm644 "$startdir/files/runneos-trusted" "$pkgdir/usr/share/pacman/keyrings/runneos-trusted"
+  install -Dm644 "$startdir/files/runneos.asc" "$pkgdir/usr/share/doc/$pkgname/runneos.asc"
+  install -Dm644 "$startdir/README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 "$startdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

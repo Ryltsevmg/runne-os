@@ -1,0 +1,34 @@
+pkgname=runneos-agents-service
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Служба очереди задач агентов RunneOS: фоновое выполнение, crash-safe, уведомления'
+arch=('any')
+# Адрес проекта: собственный репозиторий пакетов RunneOS (раздаётся через tailnet,
+# см. .agents/skills/runneos/references/repository.md). Публичного адреса исходников
+# у проекта пока нет: когда появится, это поле нужно заполнить им.
+url='https://github.com/Ryltsevmg/runne-os'
+license=('MIT')
+depends=('runneos-agents>=0.9.0' 'python')
+optdepends=(
+  'libnotify: уведомления о завершении задач (notify-send)'
+  'codex: провайдер Codex CLI'
+  'opencode: альтернативный провайдер'
+)
+options=('!emptydirs')
+
+check() {
+  # Файл вне шаблона test_agents_* — check() ядра его не подхватывает.
+  PYTHONDONTWRITEBYTECODE=1 python -m unittest discover \
+    -s "$startdir/../../tests" -p 'test_service_agents.py' -v
+}
+
+package() {
+  install -Dm755 "$startdir/files/runneos-agents-service" \
+    "$pkgdir/usr/bin/runneos-agents-service"
+  install -Dm644 "$startdir/files/runneos-agents-service.service" \
+    "$pkgdir/usr/lib/systemd/user/runneos-agents-service.service"
+  # Осознанно НЕ включаем: инвариант «ничего не запускает себя» (INTERFACE §1).
+
+  install -Dm644 "$startdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$startdir/README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

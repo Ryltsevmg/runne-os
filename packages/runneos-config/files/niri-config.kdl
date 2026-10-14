@@ -1,0 +1,17 @@
+// RunneOS defaults. DMS is started once by its systemd user service.
+environment {
+    TERMINAL "runneos-terminal"
+}
+input {
+    keyboard {
+        xkb {
+            layout "us,ru"
+            options "grp:alt_shift_toggle"
+        }
+    }
+}
+layout {
+    gaps 8
+    default-column-width { proportion 0.5; }
+}
+include "niri-bindings.kdl"

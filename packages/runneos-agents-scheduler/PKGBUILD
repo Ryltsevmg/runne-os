@@ -1,0 +1,38 @@
+pkgname=runneos-agents-scheduler
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Расписания задач агентов RunneOS и уведомления (opt-in пользовательский таймер)'
+arch=('any')
+# Адрес проекта: собственный репозиторий пакетов RunneOS (раздаётся через tailnet,
+# см. .agents/skills/runneos/references/repository.md). Публичного адреса исходников
+# у проекта пока нет: когда появится, это поле нужно заполнить им.
+url='https://github.com/Ryltsevmg/runne-os'
+license=('MIT')
+depends=('runneos-agents>=0.7.0' 'python')
+optdepends=(
+  'libnotify: уведомления о результатах (notify-send)'
+  'codex: провайдер Codex CLI'
+  'opencode: альтернативный провайдер'
+)
+options=('!emptydirs')
+
+check() {
+  # Файл вне шаблона test_agents_* — check() ядра его не подхватывает.
+  PYTHONDONTWRITEBYTECODE=1 python -m unittest discover \
+    -s "$startdir/../../tests" -p 'test_scheduler_agents.py' -v
+}
+
+package() {
+  install -Dm755 "$startdir/files/runneos-agents-scheduler" \
+    "$pkgdir/usr/bin/runneos-agents-scheduler"
+  install -Dm644 "$startdir/files/runneos-agents-scheduler.service" \
+    "$pkgdir/usr/lib/systemd/user/runneos-agents-scheduler.service"
+  install -Dm644 "$startdir/files/runneos-agents-scheduler.timer" \
+    "$pkgdir/usr/lib/systemd/user/runneos-agents-scheduler.timer"
+  # Осознанно НЕ включаем таймер за пользователя: расписания — opt-in
+  # (инвариант ядра «ничего не запускает себя» распространяется и на этот пакет).
+  # Включение: systemctl --user enable --now runneos-agents-scheduler.timer
+
+  install -Dm644 "$startdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$startdir/README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

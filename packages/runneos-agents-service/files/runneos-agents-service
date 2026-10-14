@@ -1,0 +1,195 @@
+#!/usr/bin/python3
+"""runneos-agents-service — служба очереди задач агентов (INTERFACE v1.10).
+
+Зачем отдельный пакет: ядро `runneos-agents` по инварианту ничего не запускает само
+(INTERFACE §1). Очередь — это «само»: поэтому исполнитель живёт здесь, как юнит
+пользователя (opt-in: `systemctl --user enable --now runneos-agents-service.service`).
+Сам ход выполняет штатное ядро — все ворота действуют (доступность, авторизация,
+политика, песочница), в журнале агента задача неотличима от обычного `ask`.
+
+Поведение:
+* на старте возвращает `running`-задачи в очередь (ход не мог пережить перезапуск
+  процесса, задача — могла): crash-safe;
+* забирает задачи строго FIFO (`claim_next_task` с BEGIN IMMEDIATE);
+* отменённую задачу замечает на очередном событии хода: стрим закрывается, процесс
+  провайдера гасится, итог — `canceled` (терминальное);
+* уведомляет о завершении через notify-send (режим failure по умолчанию).
+
+Без дисплея/notify-send — тихо. Конфигурации нет: поведение задано кодом,
+_poll_интервал — 2 секунды (просыпается дёшево, без дозревших задач ничего не делает).
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+POLL_SECONDS = 2.0
+RUN_TIMEOUT = 1800
+
+EXIT_OK = 0
+EXIT_ERROR = 1
+
+
+def _core_dir() -> str:
+    """Каталог ядра runneos_agents: RUNNEOS_AGENTS_FILES → рядом со скриптом → установка.
+
+    Переменная нужна тестам и подбору версий: служба обязана идти с ядром не старше
+    своего пакета (зависимость runneos-agents>=0.9.0).
+    """
+    override = os.environ.get("RUNNEOS_AGENTS_FILES", "").strip()
+    here = Path(__file__).resolve().parent
+    candidates = ([Path(override)] if override else []) + [
+        here, here / "share", Path("/usr/share/runneos/agents")]
+    for candidate in candidates:
+        if (candidate / "runneos_agents" / "__init__.py").exists():
+            return str(candidate)
+    raise SystemExit("ядро runneos_agents не найдено: установлен ли пакет runneos-agents?")
+
+
+sys.path.insert(0, _core_dir())
+
+from runneos_agents.model import Task  # noqa: E402
+from runneos_agents.orchestrator import Orchestrator  # noqa: E402
+from runneos_agents.store import Store  # noqa: E402
+
+
+def execute_task(
+    task: Task,
+    *,
+    store_factory=Store,
+    adapters=None,
+    notify: str = "notify-send",
+    ask_timeout: float = RUN_TIMEOUT,
+) -> None:
+    """Выполнить одну running-задачу до терминального состояния (блокирует ход)."""
+    from runneos_agents import default_registry
+
+    store = store_factory()
+    try:
+        orchestrator = Orchestrator(store, adapters if adapters is not None else default_registry())
+
+        def canceled() -> bool:
+            current = store.get_task(task.id)
+            return current is not None and current.state == "canceled"
+
+        result = orchestrator.ask(
+            task.agent_id,
+            task.prompt,
+            new_session=False,
+            timeout=ask_timeout,
+            should_cancel=canceled,
+        )
+        session_id = result.session_id or None
+        if task.state == "canceled" or canceled():
+            # CLI успел отменить: терминальное состояние уже стоит, дописываем итог.
+            store.set_task_state(
+                task.id, "canceled",
+                finished_at=_now(), session_id=session_id,
+                error=result.error or "ход отменён",
+            )
+        elif result.ok:
+            store.set_task_state(
+                task.id, "done",
+                finished_at=_now(), session_id=session_id, result=result.text,
+            )
+        else:
+            store.set_task_state(
+                task.id, "failed",
+                finished_at=_now(), session_id=session_id, error=result.error or "ход не удался",
+            )
+        _notify_completion(notify, task.agent_id, result.ok, result.text, result.error)
+    finally:
+        store.close()
+
+
+def _now() -> str:
+    from runneos_agents.model import now_iso
+
+    return now_iso()
+
+
+def _notify_completion(notify: str, agent_id: str, ok: bool, text: str, error: str | None) -> None:
+    if not notify:
+        return
+    body = text if ok else f"ошибка: {error or 'ход не удался'}"
+    try:
+        subprocess.run(
+            [notify, "-a", "RunneOS", f"Задача агента {agent_id}", str(body)[:300]],
+            capture_output=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def serve_loop(
+    *,
+    store_factory=Store,
+    adapters=None,
+    poll: float = POLL_SECONDS,
+    notify: str = "notify-send",
+    once: bool = False,
+    ask_timeout: float = RUN_TIMEOUT,
+) -> int:
+    """Основной цикл службы. `once=True` — обработать всё, что есть, и выйти (тесты)."""
+    store = store_factory()
+    try:
+        recovered = store.recover_running_tasks()
+    finally:
+        store.close()
+    if recovered:
+        print(f"возвращено в очередь после перезапуска: {len(recovered)} задач(а)", flush=True)
+
+    processed = 0
+    while True:
+        store = store_factory()
+        try:
+            task = store.claim_next_task()
+        finally:
+            store.close()
+        if task is None:
+            if once:
+                break
+            time.sleep(poll)
+            continue
+        execute_task(task, store_factory=store_factory, adapters=adapters,
+                     notify=notify, ask_timeout=ask_timeout)
+        processed += 1
+        if once:
+            # за один проход вычищаем очередь, но не крутимся вечно
+            probe = store_factory()
+            try:
+                if probe.claim_next_task() is None:
+                    break
+            finally:
+                probe.close()
+    return EXIT_OK if processed >= 0 else EXIT_ERROR
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="runneos-agents-service",
+        description="Служба очереди задач агентов RunneOS (INTERFACE v1.10).",
+    )
+    parser.add_argument("--version", action="version", version="runneos-agents-service 0.1.0")
+    parser.add_argument("--once", action="store_true", help="вычистить очередь и выйти (для тестов/ручного прогона)")
+    parser.add_argument("--poll", type=float, default=POLL_SECONDS, help="интервал опроса очереди, с")
+    parser.add_argument("--no-notify", action="store_true", help="без уведомлений о завершении")
+    args = parser.parse_args(argv)
+
+    notify = "" if args.no_notify else "notify-send"
+    try:
+        return serve_loop(poll=args.poll, notify=notify, once=args.once)
+    except KeyboardInterrupt:
+        print("\nслужба остановлена", file=sys.stderr)
+        return EXIT_OK
+
+
+if __name__ == "__main__":
+    threading.current_thread().name = "runneos-agents-service"
+    sys.exit(main())

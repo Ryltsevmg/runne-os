@@ -1,0 +1,15 @@
+#!/usr/bin/python3
+"""Translate yay's pacman privilege requests into desktop polkit authorization."""
+import os
+import sys
+
+args=sys.argv[1:]
+# With --sudoloop=false yay never needs an authentication keepalive.
+# Only pacman's real invocation should open the authorization dialog.
+if args in (['-v'],['-n','-v']):
+    raise SystemExit(0)
+if args and args[0]=='--':args=args[1:]
+if not args or args[0] not in ('pacman','/usr/bin/pacman'):
+    print('RunneOS: разрешено только управление пакетами pacman',file=sys.stderr)
+    raise SystemExit(126)
+os.execv('/usr/bin/pkexec',['pkexec','/usr/bin/pacman',*args[1:]])

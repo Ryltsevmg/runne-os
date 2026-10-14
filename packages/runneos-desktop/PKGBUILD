@@ -1,0 +1,29 @@
+pkgname=runneos-desktop
+pkgver=0.0.11
+pkgrel=3
+pkgdesc="Runne OS desktop metapackage"
+arch=("any")
+license=("MIT")
+depends=("niri" "dms-shell" "ghostty" "xwayland-satellite"
+         "xdg-desktop-portal-gtk" "xdg-desktop-portal-gnome" "gnome-keyring" "seahorse" "bitwarden"
+         "pipewire" "pipewire-pulse" "wireplumber" "libldac" "bluez" "bluez-utils" "polkit" "wtype"
+         "nautilus" "tmux" "neovim" "btop"
+         "inter-font" "ttf-jetbrains-mono" "snapper" "snap-pac" "runneos-config"
+         "runneos-ai-usage" "runneos-software" "runneos-theme" "runneos-tools" "gpu-screen-recorder" "ffmpeg" "libxkbcommon" "xkeyboard-config")
+# BlueZ is part of the desktop, not an add-on: DMS draws the Bluetooth switch in its
+# control center, and without bluez/bluez-utils the panel reports "no adapters" on a
+# machine that physically has one. libldac supplies the LDAC codec for headsets.
+# The service itself is enabled by the installer (`services`) and by the safety step in
+# runneos-config's runneos-post-install — see references/health.md, "Bluetooth ноутбука".
+# The browser is not a hard dependency: the desktop is complete without a
+# specific one, the workstation runs Firefox and Chrome as Flatpaks, and a hard
+# native dependency would install a second browser next to them. The ISO lists
+# firefox explicitly instead, so a fresh install still has a browser.
+# gnome-sushi (GNOME Sushi, Arch package `sushi`) is an optional convenience, not a
+# hard dependency: Space in Nautilus opens a quick file preview (macOS Quick Look
+# analog). Listed explicitly in the installer packages as well.
+optdepends=("firefox: браузер по умолчанию" "sddm: дисплей-менеджер для установленной системы"
+            "sushi: предпросмотр файлов по пробелу (Quick Look)")
+package() {
+  :
+}

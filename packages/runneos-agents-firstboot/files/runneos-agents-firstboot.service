@@ -1,0 +1,20 @@
+# Онбординг агентов RunneOS: диалог подключения провайдеров при первом входе.
+# Юнит пользовательский и системный одновременно (симлинк в /etc/systemd/user,
+# как у dms.service): включён для всех пользователей, однократность задаёт
+# маркер, который пишет сам диалог при закрытии. Вернуть диалог:
+#   runneos-agents-firstboot --reset
+[Unit]
+Description=Онбординг агентов RunneOS: подключение провайдеров
+ConditionPathExists=!%h/.local/state/runneos/agents-firstboot/done
+# Окно сеанса: ждём графический ввод и поднявшуюся оболочку DMS.
+After=graphical-session.target dms.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/runneos-agents-firstboot
+RemainAfterExit=yes
+# Диалог живёт, пока пользователь не закроет его (вход в провайдера может занять время).
+TimeoutStartSec=0
+
+[Install]
+WantedBy=graphical-session.target

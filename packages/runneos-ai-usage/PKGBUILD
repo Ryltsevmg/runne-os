@@ -1,0 +1,37 @@
+pkgname=runneos-ai-usage
+pkgver=0.2.0
+pkgrel=6
+pkgdesc='RunneOS AI Usage: nine providers, account limits and local usage'
+arch=('x86_64' 'aarch64')
+license=('MIT')
+depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'libsecret' 'dms-shell' 'runneos-theme>=0.2.0')
+makedepends=('go')
+optdepends=('codex: Codex login and usage history' 'claude-code: Claude usage history' 'opencode: local provider usage and saved API connections' 'aliyun-cli: Alibaba Cloud account balance')
+_commit=57f0b6368ad8c7119b07e479ffd08850f9d62c72
+source=("DankAIUsage-${_commit}.tar.gz::https://codeload.github.com/alcxyz/DankAIUsage/tar.gz/${_commit}")
+sha256sums=('be9ce2abd71f33fa1eaf45295392746db82a63663face92b998212192f4f6957')
+build() {
+  cd "$srcdir/DankAIUsage-${_commit}"
+  CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags '-X main.version=1.3.1-runneos.1' -o dankaiusage ./cmd/dankaiusage
+}
+check() {
+  python -m unittest discover -s "$startdir/tests" -q
+  cd "$srcdir/DankAIUsage-${_commit}"
+  go test ./...
+}
+package() {
+  install -Dm755 "$srcdir/DankAIUsage-${_commit}/dankaiusage" "$pkgdir/usr/bin/dankaiusage"
+  install -Dm755 "$startdir/files/collect.py" "$pkgdir/usr/bin/runneos-ai-usage"
+  for file in collect.py accounts.py codex_limits.py engine_v2.py ai_center.py model_v2.py; do
+    install -Dm644 "$startdir/files/$file" "$pkgdir/usr/lib/runneos-ai/$file"
+  done
+  for file in runneos-ai runneos-ai-collect; do
+    install -Dm755 "$startdir/files/$file" "$pkgdir/usr/bin/$file"
+  done
+  install -Dm644 "$startdir/files/org.runneos.AI.desktop" "$pkgdir/usr/share/applications/org.runneos.AI.desktop"
+  for file in RunneAIUsageWidget.qml RunneAIUsageSettings.qml; do
+    install -Dm644 "$startdir/files/$file" "$pkgdir/usr/share/runneos/ai-usage/$file"
+  done
+  install -Dm644 "$startdir/README.md" "$pkgdir/usr/share/doc/runneos-ai-usage/README.md"
+  install -Dm644 "$srcdir/DankAIUsage-${_commit}/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/DankAIUsage-LICENSE"
+}

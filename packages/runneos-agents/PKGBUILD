@@ -1,0 +1,78 @@
+pkgname=runneos-agents
+pkgver=0.9.0
+pkgrel=1
+pkgdesc='RunneOS Agents: постоянные ИИ-агенты со своими воркспейсами и журналом'
+arch=('any')
+# Адрес проекта: собственный репозиторий пакетов RunneOS (раздаётся через tailnet,
+# см. .agents/skills/runneos/references/repository.md). Прежнее значение
+# https://github.com/runneos/runneos ведёт в 404 — такого репозитория нет.
+# Публичного адреса исходников у проекта пока нет: когда появится, это поле нужно
+# заполнить им, а не адресом репозитория пакетов.
+url='https://github.com/Ryltsevmg/runne-os'
+license=('MIT')
+# Провайдеры (codex, opencode) намеренно не в зависимостях: пакет работает и без них,
+# а честно сообщает, что агент не может выполнить задачу. Пользователь ставит свой CLI сам.
+depends=('python' 'python-gobject' 'gtk4' 'libadwaita')
+optdepends=(
+  'codex: провайдер Codex CLI для задач агентов'
+  'opencode: альтернативный провайдер (запускается без --auto: задача с подтверждением прав упрётся в таймаут)'
+  'dms-shell: виджет агентов на панели рабочего стола'
+  'git: локальная история изменений в воркспейсе агента'
+)
+options=('!emptydirs')
+
+check() {
+  # Тесты лежат в общем каталоге репозитория и находят пакет по дереву исходников.
+  PYTHONDONTWRITEBYTECODE=1 python -m unittest discover \
+    -s "$startdir/../../tests" -p 'test_agents_*.py' -v
+}
+
+package() {
+  # Ядро и CLI
+  install -d "$pkgdir/usr/share/runneos/agents/runneos_agents"
+  install -Dm644 "$startdir/files/runneos_agents/__init__.py" \
+    "$pkgdir/usr/share/runneos/agents/runneos_agents/__init__.py"
+  # Глобб вместо списка: новые модули ядра попадают в пакет механически.
+  # Дважды обжигались: sandbox.py (0.4.0), channels.py и api.py (0.8.0-1 —
+  # найдено живой установкой в QEMU 2026-10-14).
+  for module in "$startdir"/files/runneos_agents/*.py; do
+    install -Dm644 "$module" \
+      "$pkgdir/usr/share/runneos/agents/runneos_agents/$(basename "$module")"
+  done
+  if [[ -d "$startdir/files/runneos_agents/adapters" ]]; then
+    install -d "$pkgdir/usr/share/runneos/agents/runneos_agents/adapters"
+    cp -a "$startdir/files/runneos_agents/adapters/." \
+      "$pkgdir/usr/share/runneos/agents/runneos_agents/adapters/"
+    find "$pkgdir/usr/share/runneos/agents/runneos_agents/adapters" -name '__pycache__' \
+      -type d -prune -exec rm -rf {} +
+  fi
+
+  # Команды
+  install -Dm755 "$startdir/files/runneos-agents" "$pkgdir/usr/bin/runneos-agents"
+  if [[ -f "$startdir/files/runneos-agents-panel" ]]; then
+    install -Dm755 "$startdir/files/runneos-agents-panel" "$pkgdir/usr/bin/runneos-agents-panel"
+  fi
+  if [[ -f "$startdir/files/install-panel.py" ]]; then
+    install -Dm755 "$startdir/files/install-panel.py" "$pkgdir/usr/bin/runneos-agents-panel-install"
+  fi
+
+  # Интеграция с рабочим столом
+  if [[ -f "$startdir/files/org.runneos.Agents.desktop" ]]; then
+    install -Dm644 "$startdir/files/org.runneos.Agents.desktop" \
+      "$pkgdir/usr/share/applications/org.runneos.Agents.desktop"
+  fi
+  # Виджет DMS. DMS читает плагины из ~/.config/DankMaterialShell/plugins/<id>/,
+  # поэтому пакет кладёт источник в /usr/share/dms-plugins/RunneosAgents/ — оттуда
+  # пользователь копирует каталог целиком (см. README, раздел про виджет).
+  if [[ -d "$startdir/files/dms-plugin" ]]; then
+    install -d "$pkgdir/usr/share/dms-plugins/RunneosAgents"
+    install -Dm644 "$startdir/files/dms-plugin/RunneAgentsWidget.qml" \
+      "$pkgdir/usr/share/dms-plugins/RunneosAgents/RunneAgentsWidget.qml"
+    install -Dm644 "$startdir/files/dms-plugin/plugin.json" \
+      "$pkgdir/usr/share/dms-plugins/RunneosAgents/plugin.json"
+  fi
+
+  # Служба пользователя не входит в v1: ядро не должно запускаться само.
+  install -Dm644 "$startdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$startdir/README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

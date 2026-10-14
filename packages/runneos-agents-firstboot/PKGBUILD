@@ -1,0 +1,39 @@
+pkgname=runneos-agents-firstboot
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Онбординг агентов RunneOS: подключение провайдеров при первом входе в сеанс'
+arch=('any')
+# Адрес проекта: собственный репозиторий пакетов RunneOS (раздаётся через tailnet,
+# см. .agents/skills/runneos/references/repository.md). Публичного адреса исходников
+# у проекта пока нет: когда появится, это поле нужно заполнить им.
+url='https://github.com/Ryltsevmg/runne-os'
+license=('MIT')
+depends=('runneos-agents>=0.3.0' 'runneos-config' 'python' 'python-gobject' 'gtk4' 'libadwaita')
+optdepends=(
+  'codex: провайдер Codex CLI (вход: codex login)'
+  'opencode: альтернативный провайдер (вход: opencode auth login)'
+)
+options=('!emptydirs')
+
+check() {
+  # Тесты лежат в общем каталоге репозитория; файл назван вне шаблона test_agents_*,
+  # чтобы check() пакета runneos-agents его не подхватывал.
+  PYTHONDONTWRITEBYTECODE=1 python -m unittest discover \
+    -s "$startdir/../../tests" -p 'test_firstboot_agents.py' -v
+}
+
+package() {
+  install -Dm755 "$startdir/files/runneos-agents-firstboot" \
+    "$pkgdir/usr/bin/runneos-agents-firstboot"
+  install -Dm644 "$startdir/files/runneos-agents-firstboot.service" \
+    "$pkgdir/usr/lib/systemd/user/runneos-agents-firstboot.service"
+
+  # Включение для всех пользователей сеанса: тот же приём, что у dms.service в
+  # runneos-config и vicinae.service. Однократность задаёт не юнит, а маркер диалога.
+  install -d "$pkgdir/etc/systemd/user/graphical-session.target.wants"
+  ln -s /usr/lib/systemd/user/runneos-agents-firstboot.service \
+    "$pkgdir/etc/systemd/user/graphical-session.target.wants/runneos-agents-firstboot.service"
+
+  install -Dm644 "$startdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$startdir/README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

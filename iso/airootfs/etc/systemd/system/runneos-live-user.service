@@ -1,0 +1,15 @@
+[Unit]
+Description=RunneOS live desktop user
+Documentation=file:///usr/local/bin/runneos-live-user
+# The console autologin on tty1 needs the user to exist already, otherwise
+# agetty falls back to a login prompt and the desktop never starts.
+Before=getty@tty1.service getty@tty2.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/runneos-live-user
+
+[Install]
+WantedBy=multi-user.target

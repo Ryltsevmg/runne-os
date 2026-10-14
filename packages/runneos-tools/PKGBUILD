@@ -1,0 +1,18 @@
+pkgname=runneos-tools
+pkgver=0.1.1
+pkgrel=5
+pkgdesc='RunneOS Hub and read-only workstation diagnostics'
+arch=('any')
+license=('MIT')
+depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'niri' 'dms-shell' 'ghostty'
+         'runneos-software' 'runneos-theme>=0.2.0' 'runneos-ai-usage' 'runneos-launcher' 'bitwarden' 'seahorse')
+check() {
+  PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s "$startdir/../../tests" -p test_doctor.py -v
+}
+package() {
+  install -Dm755 "$startdir/files/doctor.py" "$pkgdir/usr/bin/runneos-doctor"
+  install -Dm755 "$startdir/files/context.py" "$pkgdir/usr/bin/runneos-context"
+  install -Dm755 "$startdir/files/hub.py" "$pkgdir/usr/bin/runneos-hub"
+  install -Dm644 "$startdir/files/org.runneos.Hub.desktop" "$pkgdir/usr/share/applications/org.runneos.Hub.desktop"
+  install -Dm644 "$startdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

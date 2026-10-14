@@ -1,0 +1,14 @@
+{
+  "id": "runneosAgents",
+  "name": "Агенты RunneOS",
+  "description": "Состояние локальных ИИ-агентов и последнее сообщение",
+  "version": "0.1.0",
+  "author": "RunneOS",
+  "icon": "smart_toy",
+  "type": "widget",
+  "capabilities": ["dankbar-widget"],
+  "component": "./RunneAgentsWidget.qml",
+  "permissions": ["process"],
+  "requires": ["runneos-agents"],
+  "requires_dms": ">=1.6.3"
+}

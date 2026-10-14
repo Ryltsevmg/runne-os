@@ -1,0 +1,8 @@
+{
+  "keyboardLayoutSearch": {"layouts": "us,ru", "noTrigger": true},
+  "calculator": {"trigger": "=", "calcEngine": "default"},
+  "niriWindows": {"trigger": "!"},
+  "screenshotPlus": {"backend": "cli", "copyToClipboard": true, "saveToFile": true},
+  "screenRecorder": {"captureSource": "portal", "audioMode": "system"},
+  "dankAIUsage": {"barProvider": "codex", "periodDays": "7", "refreshInterval": 300, "enableClaudePrime": false, "publicResetAnnouncements": false}
+}

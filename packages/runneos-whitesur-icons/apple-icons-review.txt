@@ -1,0 +1,11 @@
+WhiteSur-dark/devices/symbolic/phone-apple-iphone-symbolic.svg
+WhiteSur/devices/scalable/phone-apple-iphone.svg
+WhiteSur/devices/symbolic/phone-apple-iphone-symbolic.svg
+WhiteSur/mimes/16/application-vnd.apple.mpegurl.svg
+WhiteSur/mimes/16/application-vnd.apple.pkpass.svg
+WhiteSur/mimes/16/application-vnd.apple.pkpasses.svg
+WhiteSur/mimes/22/application-vnd.apple.pkpass.svg
+WhiteSur/mimes/22/application-vnd.apple.pkpasses.svg
+WhiteSur/mimes/scalable/application-vnd.apple.mpegurl.svg
+WhiteSur/mimes/scalable/application-vnd.apple.pkpass.svg
+WhiteSur/mimes/scalable/application-vnd.apple.pkpasses.svg

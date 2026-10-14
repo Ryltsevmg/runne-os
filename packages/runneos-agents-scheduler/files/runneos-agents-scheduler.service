@@ -1,0 +1,12 @@
+# Выполнение дозревших расписаний агентов RunneOS.
+# Вызывается таймером runneos-agents-scheduler.timer. Таймер НЕ включается
+# автоматически: расписания — осознанная настройка владельца
+# (systemctl --user enable --now runneos-agents-scheduler.timer).
+[Unit]
+Description=RunneOS Agents: выполнение дозревших расписаний
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/runneos-agents-scheduler run
+# Задача может идти долго: ход через штатный CLI с его таймаутами.
+TimeoutStartSec=0
